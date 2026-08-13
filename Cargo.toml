@@ -1,0 +1,39 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/horizon-core",
+    "crates/horizon-store",
+    "crates/horizon-memory",
+    "crates/horizon-scheduler",
+    "crates/horizon-process",
+    "crates/horizon-trace",
+    "crates/horizon-runtime",
+    "crates/horizon-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Horizon Contributors"]
+rust-version = "1.85"
+
+[workspace.dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+axum = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5", features = ["derive"] }
+futures = "0.3"
+http = "1.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio-rustls", "chrono", "uuid", "json", "macros"] }
+tempfile = "3.15"
+thiserror = "2.0"
+tokio = { version = "1.43", features = ["full"] }
+tower-http = { version = "0.6", features = ["trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1.12", features = ["v4", "serde"] }

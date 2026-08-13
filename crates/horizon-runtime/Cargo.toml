@@ -1,0 +1,29 @@
+[package]
+name = "horizon-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Durable event-sourced agent runtime for Horizon."
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+chrono.workspace = true
+horizon-core = { path = "../horizon-core" }
+horizon-memory = { path = "../horizon-memory" }
+horizon-process = { path = "../horizon-process" }
+horizon-scheduler = { path = "../horizon-scheduler" }
+horizon-store = { path = "../horizon-store" }
+horizon-trace = { path = "../horizon-trace" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

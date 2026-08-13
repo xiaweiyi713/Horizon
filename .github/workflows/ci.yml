@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Rust tests
+        run: cargo test --workspace
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Python tests
+        run: PYTHONPATH=python:. python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Fault injection
+        run: PYTHONPATH=python python3 tests/fault_injection.py
+      - name: Benchmark smoke suite
+        run: python3 benchmarks/horizonbench/run.py --output-dir results/horizonbench

@@ -1,0 +1,15 @@
+[package]
+name = "horizon-scheduler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Dependency-aware async task DAG scheduling primitives for Horizon."
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+futures.workspace = true
+horizon-core = { path = "../horizon-core" }
+thiserror.workspace = true
+tokio.workspace = true

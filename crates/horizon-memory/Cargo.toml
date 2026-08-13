@@ -1,0 +1,12 @@
+[package]
+name = "horizon-memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Structured cognitive state and proactive state-anchor policy for Horizon."
+
+[dependencies]
+horizon-core = { path = "../horizon-core" }
+serde.workspace = true
+thiserror.workspace = true

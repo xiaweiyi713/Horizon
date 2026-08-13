@@ -1,0 +1,20 @@
+[package]
+name = "horizon-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "SQLite-backed append-only event store and checkpoints for Horizon."
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+horizon-core = { path = "../horizon-core" }
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "horizon-trace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Structured observability bridge for Horizon runtime events."
+
+[dependencies]
+chrono.workspace = true
+horizon-core = { path = "../horizon-core" }
+serde.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

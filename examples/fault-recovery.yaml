@@ -1,0 +1,20 @@
+# Use `horizon run examples/fault-recovery.yaml --no-execute`, then interrupt a
+# running task through the HTTP API or the fault-injection test. On resume,
+# Horizon replays durable state and follows each task's retry policy.
+goal: "Recover a task after an interruption without losing its failure history"
+
+constraints:
+  - "Never treat an interrupted operation as automatically successful."
+  - "Reuse the stable operation_id on retry."
+
+plan:
+  - "Start the durable process task."
+  - "Recover from checkpoint and requeue it if retryable."
+  - "Verify the idempotency key reaches the process."
+
+tasks:
+  - name: recoverable-operation
+    operation_id: "fault-demo-operation-v1"
+    command: ["sh", "-c", "printf 'operation=%s\\n' \"$HORIZON_OPERATION_ID\""]
+    max_retries: 1
+    timeout_ms: 30000

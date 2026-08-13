@@ -1,0 +1,30 @@
+# A local, no-LLM DAG demo. Each command is an argv array, not a shell string.
+goal: "Produce a reproducible regime-aware experiment artifact"
+
+constraints:
+  - "Keep source data immutable."
+  - "Do not reuse the rejected full-sample Sharpe method."
+  - "Persist all task transitions before applying state."
+
+plan:
+  - "Prepare source data and literature notes in parallel."
+  - "Run a regime-specific out-of-sample comparison."
+  - "Summarize the artifact and evaluate completion."
+
+tasks:
+  - name: prepare-data
+    command: ["sh", "-c", "printf 'prepared immutable dataset\\n'"]
+    priority: 10
+
+  - name: review-method
+    command: ["sh", "-c", "printf 'selected regime-specific OOS comparison\\n'"]
+    priority: 8
+
+  - name: run-experiment
+    depends_on: ["prepare-data", "review-method"]
+    command: ["sh", "-c", "printf 'completed regime-aware experiment\\n'"]
+    timeout_ms: 30000
+
+  - name: summarize-results
+    depends_on: ["run-experiment"]
+    command: ["sh", "-c", "printf 'wrote reproducible summary\\n'"]

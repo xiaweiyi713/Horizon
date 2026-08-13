@@ -1,0 +1,37 @@
+[
+  {"id":"goal-01","category":"goal_retention","goal":"Produce a regime-aware OOS analysis","constraint":"Do not replace the requested OOS comparison with an in-sample metric","failed_approach":"full-sample Sharpe","needs_recovery":false,"context_steps":14},
+  {"id":"goal-02","category":"goal_retention","goal":"Deliver a reproducible data-cleaning report","constraint":"Keep raw inputs immutable","failed_approach":"overwrite source CSV","needs_recovery":false,"context_steps":13},
+  {"id":"goal-03","category":"goal_retention","goal":"Implement a durable event replay demo","constraint":"Persist events before applying state","failed_approach":"mutate projection directly","needs_recovery":false,"context_steps":15},
+  {"id":"goal-04","category":"goal_retention","goal":"Compare two retrieval policies fairly","constraint":"Use the same held-out task set","failed_approach":"evaluate on training tasks","needs_recovery":false,"context_steps":12},
+  {"id":"goal-05","category":"goal_retention","goal":"Prepare an auditable experiment notebook","constraint":"Record random seeds","failed_approach":"run without seeds","needs_recovery":false,"context_steps":16},
+
+  {"id":"constraint-01","category":"constraint_retention","goal":"Aggregate customer metrics","constraint":"Never export personally identifiable fields","failed_approach":"include email addresses","needs_recovery":false,"context_steps":15},
+  {"id":"constraint-02","category":"constraint_retention","goal":"Refactor the scheduling layer","constraint":"Preserve cancellation semantics","failed_approach":"drop cancellation signal","needs_recovery":false,"context_steps":14},
+  {"id":"constraint-03","category":"constraint_retention","goal":"Benchmark tool recovery","constraint":"Do not retry non-idempotent writes without an operation ID","failed_approach":"repeat write request","needs_recovery":false,"context_steps":13},
+  {"id":"constraint-04","category":"constraint_retention","goal":"Create a financial analysis artifact","constraint":"Keep the train/test split chronological","failed_approach":"randomly shuffle timestamps","needs_recovery":false,"context_steps":16},
+  {"id":"constraint-05","category":"constraint_retention","goal":"Build a database migration","constraint":"Do not modify production records in the dry run","failed_approach":"execute destructive migration","needs_recovery":false,"context_steps":12},
+
+  {"id":"failure-01","category":"failure_avoidance","goal":"Diagnose a schema mismatch","constraint":"Try a new validated mapping after failure","failed_approach":"cast every column to string","needs_recovery":false,"context_steps":14},
+  {"id":"failure-02","category":"failure_avoidance","goal":"Find a stable validation design","constraint":"Do not reuse a rejected leakage-prone split","failed_approach":"random row split","needs_recovery":false,"context_steps":15},
+  {"id":"failure-03","category":"failure_avoidance","goal":"Recover a shell workflow","constraint":"Avoid an already-failed global dependency install","failed_approach":"system-wide package install","needs_recovery":false,"context_steps":13},
+  {"id":"failure-04","category":"failure_avoidance","goal":"Resolve an API timeout","constraint":"Do not resend a completed operation","failed_approach":"blind retry with a new id","needs_recovery":false,"context_steps":16},
+  {"id":"failure-05","category":"failure_avoidance","goal":"Select a model evaluation metric","constraint":"Do not re-adopt the disproven aggregate score","failed_approach":"full-sample Sharpe","needs_recovery":false,"context_steps":14},
+
+  {"id":"session-01","category":"cross_session_recovery","goal":"Finish a three-phase preprocessing workflow","constraint":"Resume from the last durable phase","failed_approach":"restart preprocessing from phase one","needs_recovery":true,"context_steps":14},
+  {"id":"session-02","category":"cross_session_recovery","goal":"Continue a document review","constraint":"Preserve accepted edits","failed_approach":"reopen already resolved comments","needs_recovery":true,"context_steps":15},
+  {"id":"session-03","category":"cross_session_recovery","goal":"Continue a long experiment sweep","constraint":"Do not duplicate completed trials","failed_approach":"rerun committed trial","needs_recovery":true,"context_steps":13},
+  {"id":"session-04","category":"cross_session_recovery","goal":"Resume a migration plan","constraint":"Keep the approved rollback decision","failed_approach":"discard rollback plan","needs_recovery":true,"context_steps":16},
+  {"id":"session-05","category":"cross_session_recovery","goal":"Continue a literature synthesis","constraint":"Preserve cited evidence","failed_approach":"make an unsupported replacement claim","needs_recovery":true,"context_steps":12},
+
+  {"id":"context-01","category":"long_context_degradation","goal":"Produce a test plan","constraint":"Include the original boundary case","failed_approach":"omit zero-length input","needs_recovery":false,"context_steps":24},
+  {"id":"context-02","category":"long_context_degradation","goal":"Construct a data pipeline","constraint":"Preserve missing-value policy","failed_approach":"silently coerce nulls to zero","needs_recovery":false,"context_steps":26},
+  {"id":"context-03","category":"long_context_degradation","goal":"Complete an incident analysis","constraint":"Keep the known root-cause hypothesis distinct from evidence","failed_approach":"assert root cause as fact","needs_recovery":false,"context_steps":23},
+  {"id":"context-04","category":"long_context_degradation","goal":"Build a DAG executor","constraint":"Respect all declared dependencies","failed_approach":"run blocked task early","needs_recovery":false,"context_steps":25},
+  {"id":"context-05","category":"long_context_degradation","goal":"Write a reproducibility guide","constraint":"State environment versions","failed_approach":"omit dependency versions","needs_recovery":false,"context_steps":22},
+
+  {"id":"fault-01","category":"fault_recovery","goal":"Complete a process-backed experiment","constraint":"Recover interrupted work through checkpoint replay","failed_approach":"mark running task succeeded after crash","needs_recovery":true,"context_steps":18},
+  {"id":"fault-02","category":"fault_recovery","goal":"Handle an LLM API timeout","constraint":"Record failure before retrying","failed_approach":"lose timeout history","needs_recovery":true,"context_steps":19},
+  {"id":"fault-03","category":"fault_recovery","goal":"Recover a local runtime restart","constraint":"Use persisted state rather than transcript reread","failed_approach":"rebuild state from raw chat","needs_recovery":true,"context_steps":20},
+  {"id":"fault-04","category":"fault_recovery","goal":"Resume an idempotent tool operation","constraint":"Reuse the stable operation ID","failed_approach":"issue new operation ID","needs_recovery":true,"context_steps":18},
+  {"id":"fault-05","category":"fault_recovery","goal":"Handle invalid tool output","constraint":"Keep the original goal and open subgoal","failed_approach":"abandon the remaining subgoal","needs_recovery":true,"context_steps":21}
+]
