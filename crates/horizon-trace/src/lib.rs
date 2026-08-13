@@ -1,13 +1,19 @@
 //! Horizon's event-to-tracing bridge.
 //!
 //! Event persistence remains the authoritative audit log. This crate emits
-//! lightweight structured `tracing` records for operational visibility and is
-//! intentionally free of a particular exporter; applications can attach a fmt,
-//! OpenTelemetry, or custom subscriber without changing runtime logic.
+//! lightweight structured `tracing` records for operational visibility. The
+//! optional `otel` feature additionally streams a span for each *already
+//! committed* durable event through an OTLP/HTTP collector.
+
+#[cfg(feature = "otel")]
+mod otel;
 
 use chrono::{DateTime, Utc};
 use horizon_core::{EventRecord, RunId};
 use serde::Serialize;
+
+#[cfg(feature = "otel")]
+pub use otel::{OtelError, OtelGuard, init_otlp_http};
 
 /// Stable telemetry fields common to every durable runtime event.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -42,12 +48,14 @@ pub fn emit_persisted_event(record: &EventRecord) {
         timestamp = %event.timestamp,
         "durable runtime event"
     );
+    #[cfg(feature = "otel")]
+    otel::emit_durable_event(record);
 }
 
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
-    use horizon_core::{EventId, EventKind};
+    use horizon_core::{CURRENT_EVENT_SCHEMA_VERSION, EventId, EventKind};
 
     use super::*;
 
@@ -59,6 +67,7 @@ mod tests {
             run_id,
             sequence: 7,
             timestamp: Utc::now(),
+            schema_version: CURRENT_EVENT_SCHEMA_VERSION,
             event: EventKind::Note { message: "trace".into() },
             metadata: serde_json::Value::Null,
         };

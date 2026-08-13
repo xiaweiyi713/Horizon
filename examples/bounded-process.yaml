@@ -1,0 +1,16 @@
+# Demonstrates durable output accounting and a portable local CPU limit.
+# On macOS, use the Docker backend for max_memory_bytes; see docs/operations.md.
+goal: "Generate a bounded local artifact without retaining unbounded logs"
+
+plan:
+  - "Run a resource-bounded reporting task."
+
+tasks:
+  - name: bounded-report
+    command: ["sh", "-c", "printf 'bounded report output\\n'"]
+    timeout_ms: 30000
+    resources:
+      max_output_bytes: 1024
+      max_cpu_time_ms: 5000
+    executor:
+      kind: local

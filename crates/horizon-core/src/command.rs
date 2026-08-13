@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     AgentState, BudgetState, Constraint, DecisionRecord, EvidenceRecord, FailureRecord, MemoryItem,
-    Subgoal, TaskSpec,
+    Subgoal, TaskSpec, ToolResult,
 };
 
 /// Commands are intent, never persisted truth. The runtime validates a command,
@@ -85,6 +85,9 @@ pub enum RuntimeCommand {
         operation_id: String,
         error: String,
         retryable: bool,
+    },
+    RecordToolResult {
+        result: ToolResult,
     },
     UpdateBudget {
         budget: BudgetState,

@@ -1,0 +1,24 @@
+[package]
+name = "horizon-py"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Optional PyO3 bindings for Horizon's durable runtime."
+
+[lib]
+name = "horizon_native"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+horizon-core = { path = "../horizon-core" }
+horizon-memory = { path = "../horizon-memory" }
+horizon-runtime = { path = "../horizon-runtime" }
+horizon-store = { path = "../horizon-store" }
+pyo3.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[build-dependencies]
+pyo3-build-config.workspace = true

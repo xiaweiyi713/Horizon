@@ -37,8 +37,6 @@ def free_address() -> str:
 
 def binary() -> Path:
     candidate = ROOT / "target" / "debug" / "horizon"
-    if candidate.exists():
-        return candidate
     cargo = Path.home() / ".cargo" / "bin" / "cargo"
     command = str(cargo if cargo.exists() else "cargo")
     subprocess.run([command, "build", "-q", "-p", "horizon-cli"], cwd=ROOT, check=True)
@@ -150,6 +148,32 @@ def assert_process_timeout(client: HorizonClient) -> None:
     assert projection["tasks"][task_id]["status"] == "failed", projection["tasks"][task_id]
     failures = projection["cognitive"]["failed_attempts"]
     assert any(item["operation_id"] == "timeout-operation" for item in failures), failures
+    results = projection["tool_results"]
+    assert any(
+        item["operation_id"] == "timeout-operation" and item["status"] == "timed_out"
+        for item in results
+    ), results
+
+
+def assert_output_cap(client: HorizonClient) -> None:
+    run_id = make_executing_run(client, "Cap noisy process output without losing task state")
+    task = client.create_task(
+        run_id,
+        "bounded output",
+        command=["sh", "-c", "printf 123456789"],
+        operation_id="bounded-output-operation",
+        resources={"max_output_bytes": 4},
+    )
+    task_id = next(iter(task["projection"]["tasks"].keys()))
+    outcome = client.execute_ready_tasks(run_id)
+    assert len(outcome) == 1 and "Ok" in outcome[0]["output"], outcome
+    projection = client.get_run(run_id)
+    assert projection["tasks"][task_id]["status"] == "succeeded", projection["tasks"][task_id]
+    result = next(
+        item for item in projection["tool_results"] if item["operation_id"] == "bounded-output-operation"
+    )
+    assert result["output"]["stdout"] == "1234", result
+    assert result["output"]["stdout_truncated"], result
 
 
 def assert_python_policy_loop(client: HorizonClient) -> None:
@@ -174,7 +198,7 @@ def assert_python_policy_loop(client: HorizonClient) -> None:
     events = client.events(result.run_id)
     event_types = [event["type"] for event in events]
     assert event_types.count("tool_invoked") == 2, event_types
-    assert event_types.count("tool_succeeded") == 2, event_types
+    assert event_types.count("tool_result_recorded") == 2, event_types
 
 
 def main() -> None:
@@ -189,10 +213,11 @@ def main() -> None:
             server = assert_runtime_crash_recovery(client, executable, db, address, server)
             restarted_client = HorizonClient("http://" + address)
             assert_process_timeout(restarted_client)
+            assert_output_cap(restarted_client)
             assert_python_policy_loop(restarted_client)
         finally:
             stop_server(server)
-    print("fault injection passed: runtime crash/recovery + process timeout + Python policy loop")
+    print("fault injection passed: crash/recovery + timeout + output cap + Python policy loop")
 
 
 if __name__ == "__main__":

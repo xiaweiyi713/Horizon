@@ -13,10 +13,14 @@ mod task;
 
 pub use command::{CommandError, RuntimeCommand};
 pub use event::{
-    AnchorRecord, BudgetState, CognitiveState, Constraint, DecisionRecord, EventKind, EventRecord,
-    EvidenceRecord, FailureRecord, MemoryItem, MemoryKind, NewEvent, Subgoal,
+    AnchorRecord, BudgetState, CURRENT_EVENT_SCHEMA_VERSION, CognitiveState, Constraint,
+    DecisionRecord, EventKind, EventRecord, EvidenceRecord, FailureRecord, MemoryItem, MemoryKind,
+    NewEvent, Subgoal, ToolResult, ToolResultStatus,
 };
 pub use ids::{EventId, MemoryId, RunId, TaskId};
 pub use projection::{ProjectionError, RunProjection};
 pub use state::{AgentState, StateTransitionError};
-pub use task::{TaskRecord, TaskSpec, TaskStatus, TaskTransitionError};
+pub use task::{
+    TaskExecutionBackend, TaskRecord, TaskResourceLimits, TaskSpec, TaskSpecValidationError,
+    TaskStatus, TaskTransitionError,
+};

@@ -7,13 +7,14 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use horizon_core::{
-    AgentState, Constraint, EventRecord, RunId, RuntimeCommand, TaskId, TaskSpec, TaskStatus,
+    AgentState, Constraint, EventRecord, RunId, RuntimeCommand, TaskExecutionBackend, TaskId,
+    TaskResourceLimits, TaskSpec, TaskStatus,
 };
 use horizon_memory::DecaySignals;
 use horizon_runtime::{HorizonRuntime, RuntimeConfig, serve};
-use horizon_store::SqliteEventStore;
+use horizon_store::{EventStore, PostgresEventStore, SnapshotEncoding, SqliteEventStore};
 use serde::Deserialize;
 use tokio::fs;
 use tracing_subscriber::EnvFilter;
@@ -29,9 +30,28 @@ struct Cli {
     /// infrastructure required for the MVP.
     #[arg(long, global = true, env = "HORIZON_DB", default_value = "horizon.db")]
     db: PathBuf,
+    /// PostgreSQL event-store URL. When present, it overrides `--db` and lets
+    /// several Horizon processes share one durable runtime backend.
+    #[arg(long, global = true, env = "HORIZON_DATABASE_URL", value_name = "URL")]
+    database_url: Option<String>,
     /// Number of domain events between automatic snapshots; 0 disables automatic snapshots.
     #[arg(long, global = true, default_value_t = 12)]
     checkpoint_every: u64,
+    /// Number of newest checkpoint snapshots to retain. Set 0 to keep all
+    /// snapshots; immutable events are never removed.
+    #[arg(long, global = true, default_value_t = 8)]
+    retain_checkpoints: usize,
+    /// Checkpoint payload encoding. Every snapshot carries its own encoding
+    /// metadata, so changing this does not invalidate older snapshots.
+    #[arg(long, global = true, value_enum, default_value_t = SnapshotEncodingArg::ZstdJson)]
+    snapshot_encoding: SnapshotEncodingArg,
+    /// OTLP/HTTP collector base URL. Requires the CLI's optional `otel`
+    /// feature, for example `http://127.0.0.1:4318`.
+    #[arg(long, global = true, env = "HORIZON_OTLP_ENDPOINT", value_name = "URL")]
+    otlp_endpoint: Option<String>,
+    /// OpenTelemetry service.name used only when `--otlp-endpoint` is set.
+    #[arg(long, global = true, env = "HORIZON_OTEL_SERVICE_NAME", default_value = "horizon")]
+    otel_service_name: String,
     #[command(subcommand)]
     command: Command,
 }
@@ -72,6 +92,12 @@ enum Command {
     },
     /// Persist a checkpoint at the current boundary.
     Checkpoint { run_id: String },
+    /// Discard old checkpoint snapshots while retaining the immutable event log.
+    Compact {
+        run_id: String,
+        #[arg(long, default_value_t = 8)]
+        retain_latest: usize,
+    },
     /// Rebuild a run from checkpoint plus its event suffix without mutation.
     Replay {
         run_id: String,
@@ -94,6 +120,23 @@ enum Command {
     /// Run a self-contained durable recovery demonstration with no LLM/API key.
     Demo,
 }
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum SnapshotEncodingArg {
+    Json,
+    ZstdJson,
+}
+
+impl From<SnapshotEncodingArg> for SnapshotEncoding {
+    fn from(value: SnapshotEncodingArg) -> Self {
+        match value {
+            SnapshotEncodingArg::Json => Self::Json,
+            SnapshotEncodingArg::ZstdJson => Self::ZstdJson,
+        }
+    }
+}
+
+type Runtime = HorizonRuntime<dyn EventStore>;
 
 #[derive(Args, Debug)]
 struct InterveneArgs {
@@ -166,6 +209,10 @@ struct TaskFile {
     timeout_ms: Option<u64>,
     #[serde(default)]
     working_dir: Option<String>,
+    #[serde(default)]
+    resources: TaskResourceLimits,
+    #[serde(default)]
+    executor: TaskExecutionBackend,
 }
 
 const fn default_retries() -> u32 {
@@ -181,9 +228,43 @@ async fn main() -> Result<()> {
         )
         .with_target(false)
         .init();
+
+    #[cfg(not(feature = "otel"))]
+    if cli.otlp_endpoint.is_some() {
+        bail!("this Horizon binary was built without OTLP support; rebuild with `--features otel`");
+    }
+    #[cfg(feature = "otel")]
+    let mut otel_guard = match cli.otlp_endpoint.as_deref() {
+        Some(endpoint) => Some(
+            horizon_trace::init_otlp_http(endpoint, &cli.otel_service_name)
+                .context("configuring OTLP/HTTP durable-event export")?,
+        ),
+        None => None,
+    };
+
+    let result = run_cli(cli).await;
+    #[cfg(feature = "otel")]
+    if let Some(guard) = &mut otel_guard {
+        if let Err(error) = guard.shutdown() {
+            // Durable state has already committed. Observability must not turn
+            // a completed local command into a failure merely because its
+            // optional collector was unavailable during the final flush.
+            tracing::warn!(%error, "could not flush optional OTLP spans");
+        }
+    }
+    result
+}
+
+async fn run_cli(cli: Cli) -> Result<()> {
+    let store = open_store(&cli).await?;
     let runtime = Arc::new(HorizonRuntime::with_config(
-        Arc::new(SqliteEventStore::open(&cli.db).await.context("opening SQLite event store")?),
-        RuntimeConfig { checkpoint_every_events: cli.checkpoint_every, ..Default::default() },
+        store,
+        RuntimeConfig {
+            checkpoint_every_events: cli.checkpoint_every,
+            snapshot_encoding: cli.snapshot_encoding.into(),
+            checkpoint_retention: (cli.retain_checkpoints > 0).then_some(cli.retain_checkpoints),
+            ..Default::default()
+        },
     ));
     match cli.command {
         Command::Run { file, no_execute } => command_run(&runtime, &file, no_execute).await,
@@ -205,6 +286,14 @@ async fn main() -> Result<()> {
         Command::Checkpoint { run_id } => {
             let outcome = runtime.checkpoint(parse_run_id(&run_id)?).await?;
             println!("Checkpoint stored at sequence {}", outcome.projection.sequence);
+            Ok(())
+        }
+        Command::Compact { run_id, retain_latest } => {
+            let result = runtime.compact_checkpoints(parse_run_id(&run_id)?, retain_latest).await?;
+            println!(
+                "Retained {} checkpoints; removed {} snapshots and reclaimed {} bytes.",
+                result.retained, result.removed, result.reclaimed_bytes
+            );
             Ok(())
         }
         Command::Replay { run_id, json } => {
@@ -244,11 +333,21 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn command_run(
-    runtime: &Arc<HorizonRuntime<SqliteEventStore>>,
-    file: &Path,
-    no_execute: bool,
-) -> Result<()> {
+async fn open_store(cli: &Cli) -> Result<Arc<dyn EventStore>> {
+    if let Some(database_url) = &cli.database_url {
+        if !database_url.starts_with("postgres://") && !database_url.starts_with("postgresql://") {
+            bail!("--database-url must use postgres:// or postgresql://; SQLite uses --db");
+        }
+        return Ok(Arc::new(
+            PostgresEventStore::connect(database_url)
+                .await
+                .context("opening PostgreSQL event store")?,
+        ));
+    }
+    Ok(Arc::new(SqliteEventStore::open(&cli.db).await.context("opening SQLite event store")?))
+}
+
+async fn command_run(runtime: &Arc<Runtime>, file: &Path, no_execute: bool) -> Result<()> {
     let content = fs::read_to_string(file)
         .await
         .with_context(|| format!("reading task file {}", file.display()))?;
@@ -327,15 +426,14 @@ fn resolve_tasks(raw_tasks: Vec<TaskFile>) -> Result<Vec<TaskSpec>> {
                 dependencies,
                 max_retries: task.max_retries,
                 timeout_ms: task.timeout_ms,
+                resources: task.resources,
+                executor: task.executor,
             })
         })
         .collect()
 }
 
-async fn execute_until_idle(
-    runtime: &Arc<HorizonRuntime<SqliteEventStore>>,
-    run_id: RunId,
-) -> Result<()> {
+async fn execute_until_idle(runtime: &Arc<Runtime>, run_id: RunId) -> Result<()> {
     loop {
         let outcomes = runtime.execute_ready_tasks(run_id).await?;
         if outcomes.is_empty() {
@@ -346,10 +444,7 @@ async fn execute_until_idle(
     Ok(())
 }
 
-async fn maybe_complete(
-    runtime: &Arc<HorizonRuntime<SqliteEventStore>>,
-    run_id: RunId,
-) -> Result<()> {
+async fn maybe_complete(runtime: &Arc<Runtime>, run_id: RunId) -> Result<()> {
     let projection = runtime.projection(run_id).await?;
     if projection.state != AgentState::Executing {
         return Ok(());
@@ -363,10 +458,7 @@ async fn maybe_complete(
     Ok(())
 }
 
-async fn command_status(
-    runtime: &Arc<HorizonRuntime<SqliteEventStore>>,
-    run_id: Option<&str>,
-) -> Result<()> {
+async fn command_status(runtime: &Arc<Runtime>, run_id: Option<&str>) -> Result<()> {
     if let Some(run_id) = run_id {
         return print_projection(&runtime.projection(parse_run_id(run_id)?).await?, false);
     }
@@ -388,11 +480,7 @@ async fn command_status(
     Ok(())
 }
 
-async fn command_resume(
-    runtime: &Arc<HorizonRuntime<SqliteEventStore>>,
-    run_id: RunId,
-    execute: bool,
-) -> Result<()> {
+async fn command_resume(runtime: &Arc<Runtime>, run_id: RunId, execute: bool) -> Result<()> {
     let outcome = runtime.recover(run_id).await?;
     if outcome.projection.state == AgentState::Recovering {
         runtime.dispatch(run_id, RuntimeCommand::Transition { to: AgentState::Planning }).await?;
@@ -411,10 +499,7 @@ async fn command_resume(
     print_projection(&runtime.projection(run_id).await?, false)
 }
 
-async fn command_intervene(
-    runtime: &Arc<HorizonRuntime<SqliteEventStore>>,
-    args: InterveneArgs,
-) -> Result<()> {
+async fn command_intervene(runtime: &Arc<Runtime>, args: InterveneArgs) -> Result<()> {
     let outcome = runtime
         .intervene_if_needed(
             parse_run_id(&args.run_id)?,
@@ -436,7 +521,7 @@ async fn command_intervene(
     Ok(())
 }
 
-async fn command_demo(runtime: &Arc<HorizonRuntime<SqliteEventStore>>) -> Result<()> {
+async fn command_demo(runtime: &Arc<Runtime>) -> Result<()> {
     println!("Horizon durable recovery demo\n");
     let run_id = runtime
         .create_run("Produce a durable result without repeating a failed method")

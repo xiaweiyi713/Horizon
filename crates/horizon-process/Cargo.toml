@@ -8,6 +8,8 @@ description = "Timeout-aware process supervision for Horizon tasks."
 
 [dependencies]
 chrono.workspace = true
+horizon-core = { path = "../horizon-core" }
+libc.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

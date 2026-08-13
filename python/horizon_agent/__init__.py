@@ -6,12 +6,21 @@ state-machine or persistence logic in Python.
 """
 
 from .agent import AgentConfig, DurableAgent, RunResult
+from .adapters import AdapterError, AdapterRegistry, AdapterRequest, AdapterResult, FunctionAdapter
 from .client import HorizonApiError, HorizonClient
+from .native import NativeHorizonRuntime, NativeRuntimeUnavailable
 
 __all__ = [
     "AgentConfig",
+    "AdapterError",
+    "AdapterRegistry",
+    "AdapterRequest",
+    "AdapterResult",
     "DurableAgent",
+    "FunctionAdapter",
     "HorizonApiError",
     "HorizonClient",
+    "NativeHorizonRuntime",
+    "NativeRuntimeUnavailable",
     "RunResult",
 ]

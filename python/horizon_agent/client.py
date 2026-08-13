@@ -118,6 +118,8 @@ class HorizonClient:
         task_id: Optional[str] = None,
         parent_task_id: Optional[str] = None,
         operation_id: Optional[str] = None,
+        resources: Optional[Mapping[str, Json]] = None,
+        executor: Optional[Mapping[str, Json]] = None,
     ) -> Mapping[str, Json]:
         task = {
             "id": task_id or str(uuid4()),
@@ -130,6 +132,8 @@ class HorizonClient:
             "dependencies": list(dependencies or ()),
             "max_retries": max_retries,
             "timeout_ms": timeout_ms,
+            "resources": dict(resources or {}),
+            "executor": dict(executor or {"kind": "local"}),
         }
         return self.command(run_id, "create_task", {"task": task})
 
@@ -228,6 +232,35 @@ class HorizonClient:
             run_id,
             "record_tool_failure",
             {"operation_id": operation_id, "error": error, "retryable": retryable},
+        )
+
+    def record_tool_result(
+        self,
+        run_id: str,
+        operation_id: str,
+        tool: str,
+        status: str,
+        *,
+        output: Json = None,
+        error: Optional[str] = None,
+        duration_ms: Optional[int] = None,
+        metadata: Json = None,
+    ) -> Mapping[str, Json]:
+        """Persist a normalized terminal tool outcome for audit and replay."""
+        return self.command(
+            run_id,
+            "record_tool_result",
+            {
+                "result": {
+                    "operation_id": operation_id,
+                    "tool": tool,
+                    "status": status,
+                    "output": output,
+                    "error": error,
+                    "duration_ms": duration_ms,
+                    "metadata": metadata,
+                }
+            },
         )
 
     def update_budget(

@@ -6,6 +6,10 @@ license.workspace = true
 rust-version.workspace = true
 description = "Command-line interface for the Horizon durable agent runtime."
 
+[features]
+default = []
+otel = ["horizon-trace/otel"]
+
 [[bin]]
 name = "horizon"
 path = "src/main.rs"
@@ -17,6 +21,7 @@ horizon-core = { path = "../horizon-core" }
 horizon-memory = { path = "../horizon-memory" }
 horizon-runtime = { path = "../horizon-runtime" }
 horizon-store = { path = "../horizon-store" }
+horizon-trace = { path = "../horizon-trace" }
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true

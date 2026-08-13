@@ -55,12 +55,12 @@ Allowed actions:
 - set_plan: {"steps":["..."]}
 - open_subgoal: {"subgoal":{"id":"...","content":"...","completed":false}}
 - complete_subgoal: {"id":"..."}
-- create_task: {"task":{"id":"uuid","title":"...","parent":null,"command":["program","arg"],"dependencies":[],"priority":0,"max_retries":1,"timeout_ms":null,"working_dir":null}}
+- create_task: {"task":{"id":"uuid","title":"...","parent":null,"command":["program","arg"],"dependencies":[],"priority":0,"max_retries":1,"timeout_ms":null,"working_dir":null,"resources":{"max_memory_bytes":null,"max_cpu_time_ms":null,"max_output_bytes":null},"executor":{"kind":"local"}}}
 - start_task, block_task, unblock_task, succeed_task, fail_task, retry_task, cancel_task (with the runtime command fields)
 - remember_failure: {"failure":{"id":"...","approach":"...","reason":"...","operation_id":null,"retryable":false}}
 - record_decision: {"decision":{"id":"...","decision":"...","rationale":"..."}}
 - record_evidence: {"evidence":{"id":"...","content":"...","source":null}}
-- record_tool_invocation, record_tool_success, record_tool_failure for external tool audit events
+- record_tool_invocation, record_tool_success, record_tool_failure, record_tool_result for external tool audit events
 - update_environment: {"environment":{...}}
 - checkpoint, execute_ready_tasks, recover, intervene, finish, suspend
 

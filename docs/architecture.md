@@ -9,7 +9,7 @@ Its split is deliberate:
 |---|---|
 | LLM provider and prompts | State-machine validation |
 | Policy and action selection | Event append and projection replay |
-| Experiment adapters | SQLite checkpoints and recovery |
+| External task adapters | SQLite/PostgreSQL checkpoints and recovery |
 | Memory scoring inputs | Tokio task DAG and process supervision |
 | Benchmark orchestration | Telemetry and audit trail |
 
@@ -25,7 +25,7 @@ External policy / CLI
   construct EventKind
           │
           ▼
-  append immutable event to SQLite
+  append immutable event to EventStore
           │ assigns next per-run sequence
           ▼
   apply event to materialized RunProjection
@@ -52,9 +52,10 @@ latest checkpoint
                     recovered projection
 ```
 
-Events use SQLite WAL mode. A per-process mutation gate serializes runtime
-commands; an atomic per-run SQLite sequence table protects durable ordering
-across independent runtime instances.
+SQLite uses WAL mode. PostgreSQL is a drop-in `EventStore` alternative whose
+per-run sequence row is locked inside the append transaction. A per-process
+mutation gate serializes commands in one runtime, while each backend's atomic
+expected-sequence check protects durable ordering across independent runtimes.
 
 Runtime writes include the projection's expected sequence. If another process
 commits first, SQLite rejects the stale command instead of allowing an event
@@ -64,9 +65,17 @@ When one command produces coupled events (for example `TaskFailed` and
 `FailureRemembered`), Horizon commits them in a single SQLite transaction. A
 crash cannot leave the event log with only half of that logical command.
 
+Snapshots store explicit encoding/schema metadata, an uncompressed size, and a
+checksum. Current snapshots use zstd-compressed JSON by default; legacy JSON
+snapshots and older event payload schemas remain readable through explicit
+decode/upcast boundaries. Snapshot compaction removes only redundant snapshots,
+never immutable events.
+
 After a successful event commit, `horizon-trace` emits a structured `tracing`
-record containing the run ID, sequence, timestamp, and event type. The immutable
-event store remains the source of truth; trace exporters are operational views.
+record containing the run ID, sequence, timestamp, and event type. Its optional
+OTLP/HTTP feature additionally streams one trace span per committed event. The
+immutable event store remains the source of truth; trace exporters are
+operational views.
 
 ## Cognitive state
 
@@ -96,8 +105,24 @@ events. Tasks may also retain an optional parent task ID for hierarchical plan
 provenance; readiness is still defined solely by explicit dependencies.
 
 `horizon-process` receives argv vectors, a working directory, environment,
-timeout, and operation ID. It captures stdout/stderr, records an exit code or
-timeout, and kills timed-out children. It is not a sandbox.
+timeout, operation ID, resource limits, and an explicit local/Docker backend.
+It captures stdout/stderr with bounded retention, records truncation alongside
+exit/timeout metadata, and kills timed-out children. Docker defaults to no
+network and a read-only root filesystem; neither executor mode is a complete
+security sandbox.
+
+Python-owned external systems use `AdapterRegistry`. The registry writes
+`ToolInvoked` before a side effect and one normalized `ToolResultRecorded` after
+it, using the same stable operation ID as recovery/idempotency logic. This keeps
+adapters outside Rust's policy boundary without losing durable audit semantics.
+
+## Python bindings
+
+HTTP remains the default integration contract. The optional `horizon_native`
+PyO3 module exposes the same JSON command/projection boundary directly against
+a local SQLite runtime. Its Python wrapper implements the same client methods,
+so policy code can choose HTTP or native mode without duplicating validation or
+projection behavior.
 
 ## Idempotency model
 
@@ -106,12 +131,11 @@ reused through retries and passed to child processes as `HORIZON_OPERATION_ID`.
 An external integration should make that identifier its idempotency key. Horizon
 does not claim distributed exactly-once behavior.
 
-## Deliberate non-goals in v0.1
+## Deliberate non-goals
 
-- Distributed execution / PostgreSQL
-- Container sandboxing and resource cgroups
+- Distributed workflow coordination beyond the PostgreSQL event backend
+- Complete container sandboxing and orchestration
 - Browser and GUI automation
 - Multi-agent orchestration
 - Vector database / semantic-memory retrieval
 - Learned intervention policy
-- PyO3 bridge (HTTP is used until runtime contracts stabilize)

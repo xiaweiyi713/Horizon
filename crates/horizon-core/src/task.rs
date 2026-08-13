@@ -56,6 +56,80 @@ pub struct TaskTransitionError {
     pub to: TaskStatus,
 }
 
+/// Portable execution limits associated with one process-backed task.
+///
+/// `max_memory_bytes` and `max_cpu_time_ms` are enforced by a local Unix child
+/// or translated to Docker flags. `max_output_bytes` is enforced separately
+/// for each stdout/stderr stream by Horizon's readers on every supported
+/// platform.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskResourceLimits {
+    #[serde(default)]
+    pub max_memory_bytes: Option<u64>,
+    #[serde(default)]
+    pub max_cpu_time_ms: Option<u64>,
+    #[serde(default)]
+    pub max_output_bytes: Option<u64>,
+}
+
+impl TaskResourceLimits {
+    pub fn validate(&self) -> Result<(), TaskSpecValidationError> {
+        for (field, value) in [
+            ("max_memory_bytes", self.max_memory_bytes),
+            ("max_cpu_time_ms", self.max_cpu_time_ms),
+            ("max_output_bytes", self.max_output_bytes),
+        ] {
+            if value == Some(0) {
+                return Err(TaskSpecValidationError::ZeroResourceLimit(field));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Where a task's argv program is executed. Docker is intentionally a small,
+/// explicit execution target rather than a general sandbox orchestrator.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TaskExecutionBackend {
+    #[default]
+    Local,
+    Docker {
+        image: String,
+        /// Docker networking is disabled unless this is explicitly true.
+        #[serde(default)]
+        allow_network: bool,
+        /// Docker's writable root filesystem is disabled by default. A mounted
+        /// task working directory remains writable when supplied.
+        #[serde(default = "default_docker_read_only")]
+        read_only: bool,
+    },
+}
+
+const fn default_docker_read_only() -> bool {
+    true
+}
+
+impl TaskExecutionBackend {
+    pub fn validate(&self) -> Result<(), TaskSpecValidationError> {
+        match self {
+            Self::Local => Ok(()),
+            Self::Docker { image, .. } if image.trim().is_empty() => {
+                Err(TaskSpecValidationError::EmptyDockerImage)
+            }
+            Self::Docker { .. } => Ok(()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
+pub enum TaskSpecValidationError {
+    #[error("task resource limit `{0}` must be greater than zero when configured")]
+    ZeroResourceLimit(&'static str),
+    #[error("Docker execution requires a non-empty image")]
+    EmptyDockerImage,
+}
+
 /// A side-effect-free task declaration. Commands are argv vectors rather than
 /// shell strings so the process layer can execute them without implicit shell
 /// interpolation.
@@ -84,6 +158,10 @@ pub struct TaskSpec {
     pub max_retries: u32,
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub resources: TaskResourceLimits,
+    #[serde(default)]
+    pub executor: TaskExecutionBackend,
 }
 
 impl TaskSpec {
@@ -105,7 +183,14 @@ impl TaskSpec {
             dependencies: Vec::new(),
             max_retries: Self::default_max_retries(),
             timeout_ms: None,
+            resources: TaskResourceLimits::default(),
+            executor: TaskExecutionBackend::Local,
         }
+    }
+
+    pub fn validate_execution(&self) -> Result<(), TaskSpecValidationError> {
+        self.resources.validate()?;
+        self.executor.validate()
     }
 }
 
@@ -148,5 +233,22 @@ mod tests {
     #[test]
     fn new_tasks_have_no_parent_until_the_plan_assigns_one() {
         assert_eq!(TaskSpec::new("root task").parent, None);
+    }
+
+    #[test]
+    fn rejects_zero_resource_budget_and_empty_docker_image() {
+        let mut task = TaskSpec::new("bounded work");
+        task.resources.max_output_bytes = Some(0);
+        assert!(matches!(
+            task.validate_execution(),
+            Err(TaskSpecValidationError::ZeroResourceLimit(_))
+        ));
+        task.resources.max_output_bytes = None;
+        task.executor = TaskExecutionBackend::Docker {
+            image: " ".into(),
+            allow_network: false,
+            read_only: true,
+        };
+        assert_eq!(task.validate_execution(), Err(TaskSpecValidationError::EmptyDockerImage));
     }
 }

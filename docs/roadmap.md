@@ -9,14 +9,14 @@
 - CLI, localhost HTTP API, Python policy/client layer
 - HorizonBench fixture/scorer, ablation scaffold, fault injection
 
-## v0.2 — next engineering work
+## v0.2 — implemented
 
-- PostgreSQL event store behind `EventStore`
-- Snapshot compaction and event-schema migration tooling
-- Process resource limits / optional container executor
-- Streaming trace export via OpenTelemetry
-- PyO3 native module after HTTP contract stabilizes
-- External task adapters and richer tool-result schemas
+- PostgreSQL event store behind `EventStore`, with an opt-in integration test
+- Snapshot compaction, zstd/checksummed snapshots, and event-schema boundaries
+- Process resource limits and an explicit Docker execution backend
+- Feature-gated OTLP/HTTP trace export after durable event commit
+- PyO3 native SQLite runtime module alongside the stable HTTP contract
+- Python external task adapter registry and normalized tool-result schemas
 
 ## Research version
 

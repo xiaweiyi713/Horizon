@@ -16,13 +16,17 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use chrono::Utc;
 use horizon_core::{
-    AgentState, CommandError, EventId, EventKind, EventRecord, FailureRecord, NewEvent,
-    ProjectionError, RunId, RunProjection, RuntimeCommand, TaskId, TaskRecord, TaskStatus,
+    AgentState, CURRENT_EVENT_SCHEMA_VERSION, CommandError, EventId, EventKind, EventRecord,
+    FailureRecord, NewEvent, ProjectionError, RunId, RunProjection, RuntimeCommand, TaskId,
+    TaskRecord, TaskSpecValidationError, TaskStatus, ToolResult, ToolResultStatus,
 };
 use horizon_memory::{DecaySignals, StateAnchorPolicy, matching_failure};
 use horizon_process::{ProcessOutput, ProcessRequest, ProcessSupervisor};
 use horizon_scheduler::{AsyncTaskScheduler, TaskDag, TaskExecutionResult, TaskExecutor};
-use horizon_store::{CheckpointRecord, EventStore, StoreError};
+use horizon_store::{
+    CheckpointCompaction, CheckpointRecord, EventStore, SnapshotEncoding, StoreError,
+    decode_snapshot, encode_snapshot,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -38,6 +42,12 @@ pub struct RuntimeConfig {
     pub state_anchor_policy: StateAnchorPolicy,
     /// Maximum concurrently running process-backed tasks.
     pub task_concurrency: usize,
+    /// Per-checkpoint payload encoding. Stored metadata makes this safe to
+    /// change across runtime upgrades.
+    pub snapshot_encoding: SnapshotEncoding,
+    /// Bound retained checkpoint snapshots after each successful snapshot. The
+    /// immutable event log is never compacted. `None` preserves every snapshot.
+    pub checkpoint_retention: Option<usize>,
 }
 
 impl Default for RuntimeConfig {
@@ -46,6 +56,8 @@ impl Default for RuntimeConfig {
             checkpoint_every_events: 12,
             state_anchor_policy: StateAnchorPolicy::default(),
             task_concurrency: 4,
+            snapshot_encoding: SnapshotEncoding::ZstdJson,
+            checkpoint_retention: Some(8),
         }
     }
 }
@@ -71,7 +83,7 @@ pub struct ReadyTaskOutcome {
 }
 
 /// Generic runtime so storage can be swapped without rewriting domain code.
-pub struct HorizonRuntime<S: EventStore> {
+pub struct HorizonRuntime<S: EventStore + ?Sized> {
     store: Arc<S>,
     config: RuntimeConfig,
     supervisor: ProcessSupervisor,
@@ -80,14 +92,21 @@ pub struct HorizonRuntime<S: EventStore> {
     mutation_gate: Mutex<()>,
 }
 
-impl<S: EventStore> HorizonRuntime<S> {
+impl<S: EventStore + ?Sized> HorizonRuntime<S> {
     #[must_use]
     pub fn new(store: Arc<S>) -> Self {
         Self::with_config(store, RuntimeConfig::default())
     }
 
     #[must_use]
-    pub fn with_config(store: Arc<S>, config: RuntimeConfig) -> Self {
+    pub fn with_config(store: Arc<S>, mut config: RuntimeConfig) -> Self {
+        // The CLI and native binding both use zero as the user-friendly
+        // spelling for "keep every snapshot". Preserve that behavior for
+        // callers constructing RuntimeConfig directly instead of allowing a
+        // later automatic checkpoint to fail after it was already persisted.
+        if config.checkpoint_retention == Some(0) {
+            config.checkpoint_retention = None;
+        }
         Self { store, config, supervisor: ProcessSupervisor, mutation_gate: Mutex::new(()) }
     }
 
@@ -128,6 +147,22 @@ impl<S: EventStore> HorizonRuntime<S> {
     pub async fn events(&self, run_id: RunId) -> Result<Vec<EventRecord>, RuntimeError> {
         let _gate = self.mutation_gate.lock().await;
         Ok(self.store.load_events(run_id, 0).await?)
+    }
+
+    /// Safely discard older *checkpoint snapshots* while preserving every
+    /// immutable event. This is an operational storage control, not history
+    /// deletion, and does not change the recovered projection.
+    pub async fn compact_checkpoints(
+        &self,
+        run_id: RunId,
+        retain_latest: usize,
+    ) -> Result<CheckpointCompaction, RuntimeError> {
+        let _gate = self.mutation_gate.lock().await;
+        let projection = self.load_projection_with_origin(run_id).await?.projection;
+        if projection.sequence == 0 {
+            return Err(RuntimeError::UnknownRun(run_id));
+        }
+        Ok(self.store.compact_checkpoints(run_id, retain_latest).await?)
     }
 
     pub async fn list_runs(&self) -> Result<Vec<RunProjection>, RuntimeError> {
@@ -405,6 +440,7 @@ impl<S: EventStore> HorizonRuntime<S> {
                 if projection.tasks.contains_key(&task.id) {
                     return Err(CommandError::TaskAlreadyExists(task.id).into());
                 }
+                task.validate_execution()?;
                 let operation_id =
                     task.operation_id.as_deref().expect("normalized immediately above");
                 if projection
@@ -507,6 +543,21 @@ impl<S: EventStore> HorizonRuntime<S> {
                 }
                 Ok(vec![EventKind::ToolFailed { operation_id, error, retryable }])
             }
+            RuntimeCommand::RecordToolResult { result } => {
+                if result.operation_id.trim().is_empty() || result.tool.trim().is_empty() {
+                    return Err(RuntimeError::InvalidCommand(
+                        "tool result operation_id and tool name cannot be empty",
+                    ));
+                }
+                if result.status != ToolResultStatus::Succeeded
+                    && result.error.as_deref().is_none_or(str::is_empty)
+                {
+                    return Err(RuntimeError::InvalidCommand(
+                        "a non-successful tool result must include an error",
+                    ));
+                }
+                Ok(vec![EventKind::ToolResultRecorded { result }])
+            }
             RuntimeCommand::UpdateBudget { budget } => {
                 // Actual usage becomes known only after a model or process
                 // call. Preserve budget overruns as durable telemetry rather
@@ -593,15 +644,19 @@ impl<S: EventStore> HorizonRuntime<S> {
     }
 
     async fn persist_snapshot(&self, projection: &RunProjection) -> Result<(), RuntimeError> {
-        let state_snapshot = serde_json::to_vec(projection)?;
+        let snapshot =
+            encode_snapshot(projection, self.config.snapshot_encoding).map_err(StoreError::from)?;
         self.store
-            .save_checkpoint(CheckpointRecord {
-                run_id: projection.run_id,
-                sequence: projection.sequence,
-                created_at: Utc::now(),
-                state_snapshot,
-            })
+            .save_checkpoint(CheckpointRecord::from_encoded(
+                projection.run_id,
+                projection.sequence,
+                Utc::now(),
+                snapshot,
+            ))
             .await?;
+        if let Some(retain_latest) = self.config.checkpoint_retention {
+            self.store.compact_checkpoints(projection.run_id, retain_latest).await?;
+        }
         Ok(())
     }
 
@@ -612,7 +667,8 @@ impl<S: EventStore> HorizonRuntime<S> {
         let checkpoint = self.store.load_latest_checkpoint(run_id).await?;
         let (mut projection, checkpoint_sequence) = match checkpoint {
             Some(checkpoint) => {
-                let projection: RunProjection = serde_json::from_slice(&checkpoint.state_snapshot)?;
+                let projection: RunProjection =
+                    decode_snapshot(&checkpoint).map_err(StoreError::from)?;
                 if projection.run_id != run_id || projection.sequence != checkpoint.sequence {
                     return Err(RuntimeError::InvalidCheckpoint {
                         run_id,
@@ -658,6 +714,7 @@ fn simulate_events(
             run_id: simulated.run_id,
             sequence: simulated.sequence + 1,
             timestamp: Utc::now(),
+            schema_version: CURRENT_EVENT_SCHEMA_VERSION,
             event: event.clone(),
             metadata: serde_json::Value::Null,
         };
@@ -671,13 +728,13 @@ struct LoadedProjection {
     checkpoint_sequence: Option<u64>,
 }
 
-struct RuntimeTaskExecutor<S: EventStore> {
+struct RuntimeTaskExecutor<S: EventStore + ?Sized> {
     runtime: Arc<HorizonRuntime<S>>,
     run_id: RunId,
 }
 
 #[async_trait::async_trait]
-impl<S: EventStore> TaskExecutor for RuntimeTaskExecutor<S> {
+impl<S: EventStore + ?Sized> TaskExecutor for RuntimeTaskExecutor<S> {
     async fn execute(&self, task_spec: horizon_core::TaskSpec) -> TaskExecutionResult {
         let task_id = task_spec.id;
         let result = self.execute_inner(task_spec).await;
@@ -685,7 +742,7 @@ impl<S: EventStore> TaskExecutor for RuntimeTaskExecutor<S> {
     }
 }
 
-impl<S: EventStore> RuntimeTaskExecutor<S> {
+impl<S: EventStore + ?Sized> RuntimeTaskExecutor<S> {
     async fn execute_inner(&self, task_spec: horizon_core::TaskSpec) -> Result<String, String> {
         let initial_projection =
             self.runtime.projection(self.run_id).await.map_err(|error| error.to_string())?;
@@ -737,6 +794,8 @@ impl<S: EventStore> RuntimeTaskExecutor<S> {
             "args": args,
             "task_id": task_spec.id,
             "operation_id": operation_id,
+            "executor": task_spec.executor,
+            "resources": task_spec.resources,
         });
         if let Err(error) = self
             .runtime
@@ -765,6 +824,8 @@ impl<S: EventStore> RuntimeTaskExecutor<S> {
                     operation_id.clone(),
                 )]),
                 timeout_ms: task_spec.timeout_ms.unwrap_or(300_000),
+                resources: task_spec.resources.clone(),
+                executor: task_spec.executor.clone(),
             })
             .await;
         self.persist_process_result(task_spec.id, operation_id, output).await
@@ -779,12 +840,17 @@ impl<S: EventStore> RuntimeTaskExecutor<S> {
         match output {
             Ok(output) if output.succeeded() => {
                 self.runtime
-                    .append_raw(
+                    .append_raw_many(
                         self.run_id,
-                        EventKind::ProcessCompleted {
-                            operation_id: operation_id.clone(),
-                            exit_code: output.exit_code,
-                        },
+                        vec![
+                            EventKind::ProcessCompleted {
+                                operation_id: operation_id.clone(),
+                                exit_code: output.exit_code,
+                            },
+                            EventKind::ToolResultRecorded {
+                                result: process_tool_result(task_id, &operation_id, &output),
+                            },
+                        ],
                     )
                     .await
                     .map_err(|error| error.to_string())?;
@@ -801,12 +867,17 @@ impl<S: EventStore> RuntimeTaskExecutor<S> {
             Ok(output) => {
                 let error = process_summary(&output);
                 self.runtime
-                    .append_raw(
+                    .append_raw_many(
                         self.run_id,
-                        EventKind::ProcessCompleted {
-                            operation_id: operation_id.clone(),
-                            exit_code: output.exit_code,
-                        },
+                        vec![
+                            EventKind::ProcessCompleted {
+                                operation_id: operation_id.clone(),
+                                exit_code: output.exit_code,
+                            },
+                            EventKind::ToolResultRecorded {
+                                result: process_tool_result(task_id, &operation_id, &output),
+                            },
+                        ],
                     )
                     .await
                     .map_err(|error| error.to_string())?;
@@ -827,6 +898,23 @@ impl<S: EventStore> RuntimeTaskExecutor<S> {
             Err(error) => {
                 let message = format!("process supervisor error: {error}");
                 self.runtime
+                    .append_raw(
+                        self.run_id,
+                        EventKind::ToolResultRecorded {
+                            result: ToolResult {
+                                operation_id: operation_id.clone(),
+                                tool: "process".into(),
+                                status: ToolResultStatus::Failed,
+                                output: serde_json::Value::Null,
+                                error: Some(message.clone()),
+                                duration_ms: None,
+                                metadata: serde_json::json!({ "task_id": task_id }),
+                            },
+                        },
+                    )
+                    .await
+                    .map_err(|dispatch_error| dispatch_error.to_string())?;
+                self.runtime
                     .dispatch(
                         self.run_id,
                         RuntimeCommand::FailTask {
@@ -844,7 +932,7 @@ impl<S: EventStore> RuntimeTaskExecutor<S> {
     }
 }
 
-impl<S: EventStore> HorizonRuntime<S> {
+impl<S: EventStore + ?Sized> HorizonRuntime<S> {
     /// Internal escape hatch used only for events produced as a consequence of a
     /// supervised side effect. It still does the same durable append-and-apply
     /// sequence, and is intentionally not exported as a public free function.
@@ -853,12 +941,24 @@ impl<S: EventStore> HorizonRuntime<S> {
         run_id: RunId,
         event: EventKind,
     ) -> Result<EventRecord, RuntimeError> {
+        let mut records = self.append_raw_many(run_id, vec![event]).await?;
+        Ok(records.pop().expect("single raw event append returned one record"))
+    }
+
+    async fn append_raw_many(
+        &self,
+        run_id: RunId,
+        events: Vec<EventKind>,
+    ) -> Result<Vec<EventRecord>, RuntimeError> {
         let _gate = self.mutation_gate.lock().await;
         let mut projection = self.load_projection_with_origin(run_id).await?.projection;
         if projection.sequence == 0 {
             return Err(RuntimeError::UnknownRun(run_id));
         }
-        self.append_apply(&mut projection, event).await
+        let records =
+            self.append_apply_many_without_auto_checkpoint(&mut projection, events).await?;
+        self.maybe_automatic_checkpoint(&mut projection).await?;
+        Ok(records)
     }
 }
 
@@ -874,10 +974,44 @@ fn process_summary(output: &ProcessOutput) -> String {
     } else {
         "process produced no output"
     };
+    let truncation = match (output.stdout_truncated, output.stderr_truncated) {
+        (false, false) => "",
+        (true, false) => " [stdout truncated]",
+        (false, true) => " [stderr truncated]",
+        (true, true) => " [stdout/stderr truncated]",
+    };
     format!(
-        "exit={:?}, timeout={}, duration={}ms: {}",
-        output.exit_code, output.timed_out, output.duration_ms, details
+        "exit={:?}, timeout={}, duration={}ms: {}{}",
+        output.exit_code, output.timed_out, output.duration_ms, details, truncation
     )
+}
+
+fn process_tool_result(task_id: TaskId, operation_id: &str, output: &ProcessOutput) -> ToolResult {
+    let status = if output.succeeded() {
+        ToolResultStatus::Succeeded
+    } else if output.timed_out {
+        ToolResultStatus::TimedOut
+    } else {
+        ToolResultStatus::Failed
+    };
+    ToolResult {
+        operation_id: operation_id.to_owned(),
+        tool: "process".into(),
+        status,
+        output: serde_json::json!({
+            "exit_code": output.exit_code,
+            "stdout": output.stdout,
+            "stderr": output.stderr,
+            "stdout_truncated": output.stdout_truncated,
+            "stderr_truncated": output.stderr_truncated,
+            "timed_out": output.timed_out,
+            "executor": output.executor,
+            "resource_limits": output.resource_limits,
+        }),
+        error: (!output.succeeded()).then(|| process_summary(output)),
+        duration_ms: u64::try_from(output.duration_ms).ok(),
+        metadata: serde_json::json!({ "task_id": task_id }),
+    }
 }
 
 #[derive(Debug, Error)]
@@ -899,16 +1033,18 @@ pub enum RuntimeError {
     #[error(transparent)]
     Task(#[from] horizon_core::TaskTransitionError),
     #[error(transparent)]
+    TaskSpec(#[from] TaskSpecValidationError),
+    #[error(transparent)]
     Scheduler(#[from] horizon_scheduler::SchedulerError),
-    #[error("checkpoint serialization error: {0}")]
-    Serialization(#[from] serde_json::Error),
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use horizon_core::{AgentState, Constraint, RuntimeCommand, TaskSpec, TaskStatus};
+    use horizon_core::{
+        AgentState, Constraint, RuntimeCommand, TaskSpec, TaskStatus, ToolResult, ToolResultStatus,
+    };
     use horizon_store::SqliteEventStore;
 
     use super::*;
@@ -946,6 +1082,56 @@ mod tests {
         assert_eq!(replayed.state, AgentState::Planning);
         assert_eq!(replayed.cognitive.constraints.len(), 1);
         assert!(runtime.store().load_latest_checkpoint(run_id).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn checkpoints_are_compressed_and_can_be_compacted_without_losing_replay() {
+        let store = Arc::new(SqliteEventStore::in_memory().await.unwrap());
+        let runtime = HorizonRuntime::with_config(
+            Arc::clone(&store),
+            RuntimeConfig {
+                checkpoint_every_events: 0,
+                checkpoint_retention: None,
+                ..Default::default()
+            },
+        );
+        let run_id = runtime.create_run("retain durable state").await.unwrap().projection.run_id;
+        runtime.checkpoint(run_id).await.unwrap();
+        runtime
+            .dispatch(run_id, RuntimeCommand::Transition { to: AgentState::Planning })
+            .await
+            .unwrap();
+        runtime.checkpoint(run_id).await.unwrap();
+        runtime
+            .dispatch(run_id, RuntimeCommand::Transition { to: AgentState::Executing })
+            .await
+            .unwrap();
+        runtime.checkpoint(run_id).await.unwrap();
+        let latest = store.load_latest_checkpoint(run_id).await.unwrap().unwrap();
+        assert_eq!(latest.encoding, SnapshotEncoding::ZstdJson);
+        assert!(latest.checksum.is_some());
+        let compacted = runtime.compact_checkpoints(run_id, 2).await.unwrap();
+        assert_eq!(compacted.retained, 2);
+        assert_eq!(compacted.removed, 1);
+        let replayed = runtime.projection(run_id).await.unwrap();
+        assert_eq!(replayed.state, AgentState::Executing);
+        assert_eq!(replayed.cognitive.primary_goal.as_deref(), Some("retain durable state"));
+    }
+
+    #[tokio::test]
+    async fn zero_checkpoint_retention_keeps_snapshots_for_direct_config_callers() {
+        let runtime = HorizonRuntime::with_config(
+            Arc::new(SqliteEventStore::in_memory().await.unwrap()),
+            RuntimeConfig {
+                checkpoint_every_events: 0,
+                checkpoint_retention: Some(0),
+                ..Default::default()
+            },
+        );
+        let run_id = runtime.create_run("preserve every snapshot").await.unwrap().projection.run_id;
+        runtime.checkpoint(run_id).await.unwrap();
+        runtime.checkpoint(run_id).await.unwrap();
+        assert_eq!(runtime.config().checkpoint_retention, None);
     }
 
     #[tokio::test]
@@ -1076,6 +1262,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn structured_tool_result_is_replayed_and_marks_success() {
+        let runtime = runtime().await;
+        let run_id =
+            runtime.create_run("audit structured tool result").await.unwrap().projection.run_id;
+        runtime
+            .dispatch(
+                run_id,
+                RuntimeCommand::RecordToolResult {
+                    result: ToolResult {
+                        operation_id: "adapter-42".into(),
+                        tool: "external_adapter".into(),
+                        status: ToolResultStatus::Succeeded,
+                        output: serde_json::json!({"artifact": "ready"}),
+                        error: None,
+                        duration_ms: Some(12),
+                        metadata: serde_json::json!({"provider": "fixture"}),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+        let projection = runtime.projection(run_id).await.unwrap();
+        assert!(projection.is_operation_completed("adapter-42"));
+        assert_eq!(projection.tool_results.len(), 1);
+        assert_eq!(projection.tool_results[0].duration_ms, Some(12));
+    }
+
+    #[tokio::test]
     async fn process_task_runs_and_persists_output() {
         let runtime = runtime().await;
         let run_id = runtime.create_run("execute one task").await.unwrap().projection.run_id;
@@ -1086,10 +1300,12 @@ mod tests {
         let outcomes = runtime.execute_ready_tasks(run_id).await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert!(outcomes[0].output.as_ref().unwrap().contains("hello"));
-        assert_eq!(
-            runtime.projection(run_id).await.unwrap().tasks[&task_id].status,
-            TaskStatus::Succeeded
-        );
+        let projection = runtime.projection(run_id).await.unwrap();
+        assert_eq!(projection.tasks[&task_id].status, TaskStatus::Succeeded);
+        let result = projection.tool_results.last().unwrap();
+        assert_eq!(result.tool, "process");
+        assert_eq!(result.status, ToolResultStatus::Succeeded);
+        assert_eq!(result.output["stdout"], "hello");
     }
 
     #[tokio::test]

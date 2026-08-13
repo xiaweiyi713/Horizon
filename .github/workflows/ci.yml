@@ -10,6 +10,20 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: horizon
+          POSTGRES_PASSWORD: horizon
+          POSTGRES_DB: horizon
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U horizon -d horizon"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -21,9 +35,22 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
       - name: Rust tests
-        run: cargo test --workspace
+        env:
+          HORIZON_POSTGRES_URL: postgresql://horizon:horizon@127.0.0.1:5432/horizon
+        run: cargo test --workspace --all-features
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Build native Python wheel
+        run: |
+          python3 -m pip install 'maturin>=1.9,<2.0'
+          maturin build --manifest-path crates/horizon-py/Cargo.toml --out dist
+          python3 -m pip install dist/*.whl
+          python3 -c 'import horizon_native; assert hasattr(horizon_native, "Runtime")'
+          PYTHONPATH=python python3 - <<'PY'
+          from horizon_agent import NativeHorizonRuntime
+          runtime = NativeHorizonRuntime(":memory:", checkpoint_every=0)
+          assert runtime.create_run("native CI")["projection"]["cognitive"]["primary_goal"] == "native CI"
+          PY
       - name: Python tests
         run: PYTHONPATH=python:. python3 -m unittest discover -s tests -p 'test_*.py' -v
       - name: Fault injection

@@ -35,6 +35,7 @@ _RUNTIME_COMMANDS = frozenset(
         "record_tool_invocation",
         "record_tool_success",
         "record_tool_failure",
+        "record_tool_result",
         "update_budget",
         "update_environment",
         "suspend",
@@ -147,10 +148,23 @@ class DurableAgent:
                 "llm_policy",
                 {"step": step, "context_kind": context_kind, "context_chars": len(prompt)},
             )
+            model_started_at = time.monotonic()
             try:
                 action, response = self.policy.next_action(prompt)
             except Exception as error:
-                self.client.record_tool_failure(run_id, operation_id, str(error), retryable=True)
+                self.client.record_tool_result(
+                    run_id,
+                    operation_id,
+                    "llm_policy",
+                    "failed",
+                    error=str(error),
+                    duration_ms=int((time.monotonic() - model_started_at) * 1000),
+                    metadata={
+                        "step": step,
+                        "context_kind": context_kind,
+                        "retryable": True,
+                    },
+                )
                 return RunResult(
                     run_id,
                     str(self.client.get_run(run_id)["state"]),
@@ -159,14 +173,18 @@ class DurableAgent:
                     anchors_injected,
                     "LLM policy call failed: {}".format(error),
                 )
-            self.client.record_tool_success(
+            self.client.record_tool_result(
                 run_id,
                 operation_id,
-                {
+                "llm_policy",
+                "succeeded",
+                output={
                     "input_tokens": response.input_tokens,
                     "output_tokens": response.output_tokens,
                     "response_chars": len(response.content),
                 },
+                duration_ms=int((time.monotonic() - model_started_at) * 1000),
+                metadata={"step": step, "context_kind": context_kind},
             )
             tracker.note_response(response.input_tokens, response.output_tokens)
             self._persist_budget(run_id, tracker, started_at)
@@ -268,6 +286,8 @@ class DurableAgent:
         task.setdefault("dependencies", [])
         task.setdefault("max_retries", 1)
         task.setdefault("timeout_ms", None)
+        task.setdefault("resources", {})
+        task.setdefault("executor", {"kind": "local"})
 
     @staticmethod
     def _normalize_subgoal(data: dict[str, Any]) -> None:

@@ -18,7 +18,7 @@ Python policy / LLM
 ┌─────────────────────────────────────────────────────────┐
 │ Rust Horizon Runtime                                     │
 │                                                         │
-│ Command → Validate → Event → SQLite → Apply Projection │
+│ Command → Validate → Event → EventStore → Apply Projection │
 │                               │                         │
 │                     Checkpoint + Replay                 │
 │                               │                         │
@@ -26,7 +26,7 @@ Python policy / LLM
 └─────────────────────────────────────────────────────────┘
         │
         ├── Tokio DAG scheduler
-        └── Process supervisor (timeout, stdout/stderr, retry metadata)
+        └── Process supervisor (limits, timeout, structured results)
 ```
 
 ## Why Horizon?
@@ -46,21 +46,23 @@ Its three core mechanisms are:
 3. **Proactive State Intervention** — a transparent heuristic injects an LLM
    State Anchor only at risk boundaries, rather than on every turn.
 
-## Implemented v0.1
+## Current capabilities
 
 - Rust state machine with validated legal transitions; `Created → Completed` is
   rejected.
-- SQLite/WAL append-only event store with per-run sequence numbers.
-- Snapshot checkpoints and checkpoint-plus-suffix replay.
+- SQLite/WAL and PostgreSQL append-only event stores with per-run sequence numbers.
+- Checksummed zstd snapshots, checkpoint compaction, and schema-versioned replay.
 - Cross-process recovery of interrupted `Running` tasks under retry policy.
 - Stable logical `operation_id` delivered to child processes as
   `HORIZON_OPERATION_ID` for at-least-once + idempotency integration.
-- Tokio dependency-aware task DAG scheduler and timeout-aware process
-  supervisor.
+- Tokio dependency-aware task DAG scheduler and process supervisor with output,
+  CPU, memory, and optional Docker execution controls.
 - Structured failure memory, decisions, evidence, budget, environment, and
   State Anchor risk policy.
-- CLI, local JSON/HTTP API, dependency-free Python client/policy layer, and
-  OpenAI-compatible provider adapter.
+- CLI, local JSON/HTTP API, Python client/policy layer, PyO3 native runtime,
+  external task adapters, and an OpenAI-compatible provider adapter.
+- Structured terminal tool results and optional OTLP/HTTP spans emitted only
+  after durable event commit.
 - HorizonBench 30-task fixture, baseline/ablation smoke harness, metric scorer,
   and real cross-process fault-injection test.
 
@@ -94,7 +96,36 @@ cargo run -p horizon-cli -- --db example.db replay RUN_ID
 
 The task file uses argv arrays, not interpolated shell strings. See
 [`examples/research-workflow.yaml`](examples/research-workflow.yaml) and
-[`examples/fault-recovery.yaml`](examples/fault-recovery.yaml).
+[`examples/fault-recovery.yaml`](examples/fault-recovery.yaml). For resource
+limits, see [`examples/bounded-process.yaml`](examples/bounded-process.yaml).
+
+## Operations
+
+SQLite remains the default local-first store. For shared durable state, use a
+PostgreSQL URL instead of `--db`:
+
+```bash
+cargo run -p horizon-cli -- \
+  --database-url postgresql://horizon:secret@127.0.0.1:5432/horizon status
+```
+
+Snapshots are zstd-compressed and checksummed by default. Keep or compact only
+snapshot blobs without touching immutable history:
+
+```bash
+cargo run -p horizon-cli -- --db example.db compact RUN_ID --retain-latest 8
+```
+
+Optional OTLP export is built explicitly and streams only already-committed
+events:
+
+```bash
+cargo run -p horizon-cli --features otel -- \
+  --otlp-endpoint http://127.0.0.1:4318 --db example.db demo
+```
+
+See [operations](docs/operations.md) for migration, Docker, resource-limit, and
+telemetry behavior.
 
 ## Recover a run
 
@@ -218,6 +249,7 @@ crates/
   horizon-process/    timeout-aware process supervision
   horizon-trace/      structured tracing bridge for durable events
   horizon-runtime/    durable orchestration, recovery, HTTP API
+  horizon-py/         optional PyO3 native SQLite bindings
   horizon-cli/        local CLI
 python/horizon_agent/ LLM providers, policy loop, HTTP client
 benchmarks/           HorizonBench fixtures and scorer
@@ -226,23 +258,23 @@ experiments/          ablation-report scaffold
 
 ## Architecture decisions
 
-- **SQLite first:** one inspectable file, no service dependency. The
-  `EventStore` trait isolates a future PostgreSQL backend.
-- **HTTP before PyO3:** Python iteration stays simple while runtime contracts
-  stabilize. Native bindings are a future enhancement.
+- **SQLite first, PostgreSQL when needed:** one inspectable file remains the
+  default; the same `EventStore` contract supports shared deployments.
+- **HTTP plus PyO3:** HTTP stays the default integration contract. Native
+  bindings expose the same command/projection JSON model locally.
 - **At-least-once, not pretend exactly-once:** stable operation IDs and audit
   make effects safe only when integrations honor idempotency.
-- **No vector database in v0.1:** structured execution state is the first
-  problem. Semantic retrieval is future optional work.
-- **No browser, multi-agent, sandbox, Kubernetes, or dashboard in v0.1:** those
-  are intentionally outside the durable-runtime thesis.
+- **No vector database yet:** structured execution state is the first problem.
+  Semantic retrieval remains future optional work.
+- **No browser, multi-agent, full sandbox, Kubernetes, or dashboard:** those
+  remain intentionally outside the durable-runtime thesis.
 
 ## Status and roadmap
 
-v0.1 is a local-first durable runtime and evaluation foundation. Planned research
+Horizon is a durable runtime and evaluation foundation. Planned research
 extensions include a learned intervention policy, adaptive context budgets,
-semantic-memory retrieval, PyO3 bindings, external benchmark adapters, and
-cross-model/cross-domain experiments. See [roadmap](docs/roadmap.md).
+semantic-memory retrieval, external benchmark adapters, and cross-model/
+cross-domain experiments. See [roadmap](docs/roadmap.md).
 
 ## License
 

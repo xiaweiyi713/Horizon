@@ -6,10 +6,20 @@ license.workspace = true
 rust-version.workspace = true
 description = "Structured observability bridge for Horizon runtime events."
 
+[features]
+default = []
+# Optional OTLP/HTTP exporter. Keeping it opt-in preserves the local-first
+# binary's tiny startup surface while allowing a production collector stream.
+otel = ["dep:opentelemetry", "dep:opentelemetry-otlp", "dep:opentelemetry_sdk"]
+
 [dependencies]
 chrono.workspace = true
 horizon-core = { path = "../horizon-core" }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
 serde.workspace = true
+thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

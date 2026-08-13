@@ -4,6 +4,17 @@ use serde_json::Value;
 
 use crate::{AgentState, EventId, MemoryId, RunId, TaskId, TaskSpec};
 
+/// Version of the serialized [`EventKind`] payload understood by this build.
+///
+/// The store persists this beside every event instead of inferring it from a
+/// database migration. That lets future releases upcast older immutable event
+/// payloads without rewriting an audit log in place.
+pub const CURRENT_EVENT_SCHEMA_VERSION: u32 = 1;
+
+const fn default_event_schema_version() -> u32 {
+    CURRENT_EVENT_SCHEMA_VERSION
+}
+
 /// Structured memory types deliberately favor execution state over generic
 /// semantic retrieval. They are first-class event payloads and survive replay.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,6 +76,40 @@ pub struct EvidenceRecord {
     pub id: String,
     pub content: String,
     pub source: Option<String>,
+}
+
+/// Normalized terminal result for a tool or external executor. This avoids
+/// forcing consumers to infer success from ad-hoc strings or process exit codes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolResultStatus {
+    #[default]
+    Succeeded,
+    Failed,
+    TimedOut,
+    Cancelled,
+}
+
+impl ToolResultStatus {
+    #[must_use]
+    pub const fn is_success(self) -> bool {
+        matches!(self, Self::Succeeded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ToolResult {
+    pub operation_id: String,
+    pub tool: String,
+    pub status: ToolResultStatus,
+    #[serde(default)]
+    pub output: Value,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub metadata: Value,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -178,6 +223,7 @@ pub enum EventKind {
     ToolInvoked { operation_id: String, tool: String, input: Value },
     ToolSucceeded { operation_id: String, output: Value },
     ToolFailed { operation_id: String, error: String, retryable: bool },
+    ToolResultRecorded { result: ToolResult },
     ProcessCompleted { operation_id: String, exit_code: Option<i32> },
     MemoryCreated { memory: MemoryItem },
     FailureRemembered { failure: FailureRecord },
@@ -214,6 +260,7 @@ impl EventKind {
             Self::ToolInvoked { .. } => "tool_invoked",
             Self::ToolSucceeded { .. } => "tool_succeeded",
             Self::ToolFailed { .. } => "tool_failed",
+            Self::ToolResultRecorded { .. } => "tool_result_recorded",
             Self::ProcessCompleted { .. } => "process_completed",
             Self::MemoryCreated { .. } => "memory_created",
             Self::FailureRemembered { .. } => "failure_remembered",
@@ -233,6 +280,9 @@ impl EventKind {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NewEvent {
     pub run_id: RunId,
+    /// Schema version of `event` at the time it was produced.
+    #[serde(default = "default_event_schema_version")]
+    pub schema_version: u32,
     pub event: EventKind,
     #[serde(default)]
     pub metadata: Value,
@@ -241,7 +291,7 @@ pub struct NewEvent {
 impl NewEvent {
     #[must_use]
     pub fn new(run_id: RunId, event: EventKind) -> Self {
-        Self { run_id, event, metadata: Value::Null }
+        Self { run_id, schema_version: CURRENT_EVENT_SCHEMA_VERSION, event, metadata: Value::Null }
     }
 }
 
@@ -251,6 +301,9 @@ pub struct EventRecord {
     pub run_id: RunId,
     pub sequence: u64,
     pub timestamp: DateTime<Utc>,
+    /// The schema version used to decode this persisted event payload.
+    #[serde(default = "default_event_schema_version")]
+    pub schema_version: u32,
     #[serde(flatten)]
     pub event: EventKind,
     #[serde(default)]

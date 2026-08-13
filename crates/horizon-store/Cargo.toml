@@ -8,13 +8,16 @@ description = "SQLite-backed append-only event store and checkpoints for Horizon
 
 [dependencies]
 async-trait.workspace = true
+blake3.workspace = true
 chrono.workspace = true
 horizon-core = { path = "../horizon-core" }
+serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+zstd.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

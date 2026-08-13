@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use crate::{
     AgentState, CognitiveState, EventKind, EventRecord, RunId, TaskId, TaskRecord, TaskStatus,
+    ToolResult,
 };
 
 /// Materialized, deterministic view of a run. It can always be rebuilt from
@@ -22,6 +23,10 @@ pub struct RunProjection {
     pub tasks: BTreeMap<TaskId, TaskRecord>,
     #[serde(default)]
     pub completed_operations: BTreeSet<String>,
+    /// Terminal tool outcomes are a materialized operational view; the event
+    /// stream remains authoritative for a full audit.
+    #[serde(default)]
+    pub tool_results: Vec<ToolResult>,
     /// Sequence of the last checkpoint event applied to this projection. It is
     /// persisted in snapshots so checkpoint cadence is not distorted by the
     /// checkpoint event itself.
@@ -42,6 +47,7 @@ impl RunProjection {
             cognitive: CognitiveState::default(),
             tasks: BTreeMap::new(),
             completed_operations: BTreeSet::new(),
+            tool_results: Vec::new(),
             last_checkpoint_sequence: 0,
             last_anchor_sequence: 0,
         }
@@ -162,6 +168,12 @@ impl RunProjection {
             EventKind::ToolSucceeded { operation_id, .. } => {
                 self.completed_operations.insert(operation_id.clone());
             }
+            EventKind::ToolResultRecorded { result } => {
+                if result.status.is_success() {
+                    self.completed_operations.insert(result.operation_id.clone());
+                }
+                self.tool_results.push(result.clone());
+            }
             EventKind::ProcessCompleted { operation_id, exit_code: Some(0) } => {
                 self.completed_operations.insert(operation_id.clone());
             }
@@ -245,7 +257,7 @@ pub enum ProjectionError {
 mod tests {
     use chrono::Utc;
 
-    use crate::{EventId, EventKind, EventRecord};
+    use crate::{CURRENT_EVENT_SCHEMA_VERSION, EventId, EventKind, EventRecord};
 
     use super::*;
 
@@ -258,6 +270,7 @@ mod tests {
                 run_id,
                 sequence: 1,
                 timestamp: Utc::now(),
+                schema_version: CURRENT_EVENT_SCHEMA_VERSION,
                 event: EventKind::RunCreated { goal: "ship".into() },
                 metadata: serde_json::Value::Null,
             },
@@ -266,6 +279,7 @@ mod tests {
                 run_id,
                 sequence: 2,
                 timestamp: Utc::now(),
+                schema_version: CURRENT_EVENT_SCHEMA_VERSION,
                 event: EventKind::StateTransitioned {
                     from: AgentState::Created,
                     to: AgentState::Planning,

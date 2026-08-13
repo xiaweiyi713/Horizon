@@ -42,6 +42,29 @@ invalid lifecycle and task transitions with HTTP 422. A stale cross-process
 command receives HTTP 409 so a policy can reload the projection and retry its
 decision safely.
 
+Task declarations may include `resources` (`max_memory_bytes`,
+`max_cpu_time_ms`, `max_output_bytes`) and an `executor` object such as
+`{"kind":"local"}` or `{"kind":"docker","image":"python:3.12-slim"}`.
+Process output and external integrations should use the `record_tool_result`
+command for a structured terminal result:
+
+```json
+{
+  "type": "record_tool_result",
+  "data": {
+    "result": {
+      "operation_id": "weather:request-42",
+      "tool": "weather",
+      "status": "succeeded",
+      "output": {"temperature_c": 21},
+      "error": null,
+      "duration_ms": 87,
+      "metadata": {"provider": "example"}
+    }
+  }
+}
+```
+
 ## Intervention request
 
 ```json

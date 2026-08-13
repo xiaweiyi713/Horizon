@@ -15,7 +15,7 @@ use axum::{
 };
 use horizon_core::{RunId, RuntimeCommand};
 use horizon_memory::DecaySignals;
-use horizon_store::SqliteEventStore;
+use horizon_store::EventStore;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::net::TcpListener;
@@ -24,7 +24,7 @@ use tracing::info;
 
 use crate::{CommandOutcome, HorizonRuntime, ReadyTaskOutcome, RecoveryOutcome, RuntimeError};
 
-type Runtime = HorizonRuntime<SqliteEventStore>;
+type Runtime = HorizonRuntime<dyn EventStore>;
 
 #[derive(Clone)]
 struct AppState {
@@ -58,6 +58,7 @@ impl IntoResponse for HttpApiError {
             }
             RuntimeError::Command(_)
             | RuntimeError::State(_)
+            | RuntimeError::TaskSpec(_)
             | RuntimeError::Scheduler(_)
             | RuntimeError::InvalidCommand(_) => StatusCode::UNPROCESSABLE_ENTITY,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
@@ -195,4 +196,21 @@ pub enum HttpServerError {
     Bind(#[from] std::io::Error),
     #[error("Horizon HTTP server failed: {0}")]
     Serve(std::io::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::response::IntoResponse;
+    use horizon_core::TaskSpecValidationError;
+
+    use super::*;
+
+    #[test]
+    fn invalid_task_resource_configuration_is_a_client_error() {
+        let response = HttpApiError(RuntimeError::TaskSpec(
+            TaskSpecValidationError::ZeroResourceLimit("max_output_bytes"),
+        ))
+        .into_response();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
 }
