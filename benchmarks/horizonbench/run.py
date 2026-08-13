@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence
@@ -22,7 +23,22 @@ except ImportError:  # pragma: no cover - direct-script compatibility
 
 
 ROOT = Path(__file__).resolve().parent
+REPOSITORY_ROOT = ROOT.parents[1]
 DEFAULT_TASKS = ROOT / "tasks.json"
+
+# HorizonBench is intentionally dependency-free, but its research-control
+# strategies exercise the same pure-Python learned controller that a real
+# DurableAgent uses. In direct-script mode the package directory is not on
+# sys.path, so add it explicitly without requiring installation.
+if str(REPOSITORY_ROOT / "python") not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT / "python"))
+
+from horizon_agent.memory import (  # noqa: E402
+    AdaptiveContextBudgetController,
+    DecayFeatures,
+    LearnedInterventionPolicy,
+    LogisticDecayPredictor,
+)
 
 
 @dataclass(frozen=True)
@@ -156,6 +172,95 @@ class HorizonStrategy(Strategy):
         return EpisodeResult(**{**result.__dict__, "anchors_injected": int(high_risk)})
 
 
+class LearnedAdaptiveStrategy(Strategy):
+    """Synthetic control that exercises the real learned/budget policy code.
+
+    The fixture predictor is intentionally fixed rather than fitted from the
+    benchmark tasks: training on the same tasks being scored would be data
+    leakage. It is a wiring/control condition only; paper experiments must load
+    a separately trained artifact through ``DurableAgent``.
+    """
+
+    name = "Horizon_learned_adaptive"
+
+    def __init__(self, *, adaptive_budget: bool = True) -> None:
+        self.adaptive_budget = adaptive_budget
+        if adaptive_budget:
+            controller = AdaptiveContextBudgetController(
+                context_window_tokens=2_048,
+                base_threshold=0.55,
+                min_threshold=0.25,
+                max_threshold=0.90,
+            )
+        else:
+            # Fixed-threshold control: same predictor and State Anchor content,
+            # but neither immediate context pressure nor token premium changes
+            # the decision threshold.
+            controller = AdaptiveContextBudgetController(
+                context_window_tokens=2_048,
+                base_threshold=0.55,
+                min_threshold=0.55,
+                max_threshold=0.55,
+                context_urgency_weight=0.0,
+                run_budget_weight=0.0,
+                anchor_cost_weight=0.0,
+            )
+        self.policy = LearnedInterventionPolicy(
+            predictor=LogisticDecayPredictor(
+                # Intercept + published STATE_DECAY_FEATURE_SCHEMA feature
+                # order. This fixed artifact is deliberately not an empirical
+                # benchmark result.
+                weights=(-3.0, 0.7, 2.5, 0.5, 3.5, 2.6),
+                model_version="synthetic-control-v1",
+            ),
+            controller=controller,
+            policy_id="synthetic_logistic_state_decay",
+        )
+        if not adaptive_budget:
+            self.name = "Horizon_learned_fixed_threshold"
+
+    def run(self, scenario: Scenario) -> EpisodeResult:
+        features = _scenario_decay_features(scenario)
+        compact_context = _synthetic_compact_context(scenario)
+        anchor_context = _synthetic_anchor_context(scenario)
+        decision = self.policy.decide(
+            features.as_signals(),
+            compact_context=compact_context,
+            anchor_context=anchor_context,
+            run_budget_pressure=min(1.0, scenario.context_steps / 36.0),
+        )
+        needs_anchor = _scenario_needs_anchor(scenario)
+        if decision.inject_anchor or not needs_anchor:
+            result = _result(
+                scenario,
+                goal_retained=True,
+                constraint_retained=True,
+                failure_visible=True,
+                recovery_ok=True,
+                state_consistent=True,
+                # Retain a common base workload cost and use the controller's
+                # own text estimate for the incremental context choice.
+                tokens=1_800
+                + decision.estimated_compact_tokens
+                + (decision.estimated_anchor_tokens if decision.inject_anchor else 0),
+            )
+            return EpisodeResult(**{**result.__dict__, "anchors_injected": int(decision.inject_anchor)})
+
+        # A missed high-risk intervention behaves like structured passive state
+        # in this synthetic fixture. The condition makes false negatives visible
+        # in the published outcome metrics without pretending to be an LLM run.
+        result = _result(
+            scenario,
+            goal_retained=scenario.category != "long_context_degradation",
+            constraint_retained=False,
+            failure_visible=False,
+            recovery_ok=not scenario.needs_recovery,
+            state_consistent=False,
+            tokens=1_800 + decision.estimated_compact_tokens,
+        )
+        return EpisodeResult(**{**result.__dict__, "anchors_injected": 0})
+
+
 class AlwaysOnAnchorStrategy(HorizonStrategy):
     """Control for H3: inject a full anchor on every boundary."""
 
@@ -234,6 +339,52 @@ def _result(
     )
 
 
+def _scenario_decay_features(scenario: Scenario) -> DecayFeatures:
+    return DecayFeatures(
+        steps_since_anchor=scenario.context_steps,
+        context_pressure=min(1.0, scenario.context_steps / 30.0),
+        subgoal_switches=(
+            3
+            if scenario.category in {"failure_avoidance", "long_context_degradation"}
+            else 2 if scenario.needs_recovery else 0
+        ),
+        recent_failures=1 if scenario.category == "failure_avoidance" else 0,
+        recovered_session=scenario.needs_recovery,
+    )
+
+
+def _scenario_needs_anchor(scenario: Scenario) -> bool:
+    return (
+        scenario.category == "failure_avoidance"
+        or scenario.needs_recovery
+        or scenario.context_steps >= 18
+    )
+
+
+def _synthetic_compact_context(scenario: Scenario) -> str:
+    return "\n".join(
+        (
+            "Current durable boundary",
+            "Goal: {}".format(scenario.goal),
+            "Tasks: 4",
+            "Choose one next action.",
+        )
+    )
+
+
+def _synthetic_anchor_context(scenario: Scenario) -> str:
+    return "\n".join(
+        (
+            "STATE ANCHOR",
+            "Primary Goal: {}".format(scenario.goal),
+            "Constraints: {}".format(scenario.constraint),
+            "Failed Approaches: {}".format(scenario.failed_approach),
+            "Recovery required: {}".format(scenario.needs_recovery),
+            "Context steps: {}".format(scenario.context_steps),
+        )
+    )
+
+
 def load_scenarios(path: Path = DEFAULT_TASKS) -> list[Scenario]:
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, list):
@@ -255,6 +406,8 @@ def default_strategies(include_ablations: bool = True) -> list[Strategy]:
         StructuredPassiveStrategy(),
         AlwaysOnAnchorStrategy(),
         HorizonStrategy(),
+        LearnedAdaptiveStrategy(),
+        LearnedAdaptiveStrategy(adaptive_budget=False),
     ]
     if include_ablations:
         strategies.extend(

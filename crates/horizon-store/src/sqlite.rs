@@ -594,7 +594,7 @@ impl EventStore for SqliteEventStore {
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
-    use horizon_core::{CURRENT_EVENT_SCHEMA_VERSION, EventKind, NewEvent, RunId};
+    use horizon_core::{EventKind, NewEvent, RunId};
     use sqlx::{
         SqlitePool,
         sqlite::{SqliteConnectOptions, SqlitePoolOptions},
@@ -769,7 +769,9 @@ mod tests {
         let store = SqliteEventStore::open(&database).await.unwrap();
         assert_eq!(store.schema_version().await.unwrap(), 2);
         let events = store.load_events(run_id, 0).await.unwrap();
-        assert_eq!(events[0].schema_version, CURRENT_EVENT_SCHEMA_VERSION);
+        // The migration preserves the original payload version; loading passes
+        // it through the explicit event-schema upcast boundary.
+        assert_eq!(events[0].schema_version, 1);
         assert!(matches!(events[0].event, EventKind::RunCreated { .. }));
         let checkpoint = store.load_latest_checkpoint(run_id).await.unwrap().unwrap();
         assert_eq!(checkpoint.encoding, SnapshotEncoding::Json);

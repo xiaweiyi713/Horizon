@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use horizon_core::{AgentState, RuntimeCommand, TaskSpec, TaskStatus};
+use horizon_core::{
+    AgentState, InterventionAction, InterventionAssessment, RuntimeCommand, StateDecaySignals,
+    TaskSpec, TaskStatus,
+};
 use horizon_runtime::{HorizonRuntime, RuntimeConfig};
 use horizon_store::{EventStore, SqliteEventStore};
 use tempfile::tempdir;
@@ -93,4 +96,76 @@ async fn process_receives_stable_operation_id() {
     let projection = runtime.projection(run_id).await.unwrap();
     assert!(projection.is_operation_completed("external-operation-42"));
     assert_eq!(projection.tasks[&task_id].status, TaskStatus::Succeeded);
+}
+
+#[tokio::test]
+async fn learned_intervention_assessments_survive_checkpoint_and_event_suffix_replay() {
+    let directory = tempdir().unwrap();
+    let database = directory.path().join("learned-intervention.db");
+    let config = RuntimeConfig { checkpoint_every_events: 0, ..Default::default() };
+    let store_before_restart = Arc::new(SqliteEventStore::open(&database).await.unwrap());
+    let runtime_before_restart =
+        HorizonRuntime::with_config(Arc::clone(&store_before_restart), config.clone());
+    let run_id = runtime_before_restart
+        .create_run("replay learned intervention audit state")
+        .await
+        .unwrap()
+        .projection
+        .run_id;
+    runtime_before_restart
+        .apply_intervention(
+            run_id,
+            InterventionAssessment {
+                policy_id: "logistic_state_decay".into(),
+                policy_version: Some("durability-fixture-v1".into()),
+                risk_score_milli: 900,
+                threshold_milli: 600,
+                signals: StateDecaySignals {
+                    steps_since_anchor: 1,
+                    context_pressure: 0.8,
+                    subgoal_switches: 2,
+                    recent_failures: 1,
+                    recovered_session: false,
+                },
+                action: InterventionAction::InjectAnchor,
+                reason: "fixture risk requires anchor".into(),
+                metadata: serde_json::json!({"estimated_anchor_tokens": 99}),
+            },
+        )
+        .await
+        .unwrap();
+    runtime_before_restart.checkpoint(run_id).await.unwrap();
+    runtime_before_restart
+        .apply_intervention(
+            run_id,
+            InterventionAssessment {
+                policy_id: "logistic_state_decay".into(),
+                policy_version: Some("durability-fixture-v1".into()),
+                risk_score_milli: 150,
+                threshold_milli: 600,
+                signals: StateDecaySignals { steps_since_anchor: 1, ..Default::default() },
+                action: InterventionAction::Continue,
+                reason: "fixture risk stays below threshold".into(),
+                metadata: serde_json::json!({"estimated_compact_tokens": 24}),
+            },
+        )
+        .await
+        .unwrap();
+    drop(runtime_before_restart);
+    drop(store_before_restart);
+
+    let store_after_restart = Arc::new(SqliteEventStore::open(&database).await.unwrap());
+    let runtime_after_restart = HorizonRuntime::with_config(store_after_restart, config);
+    let projection = runtime_after_restart.projection(run_id).await.unwrap();
+    assert_eq!(projection.intervention_assessments, 2);
+    assert_eq!(
+        projection.last_intervention_assessment.as_ref().unwrap().action,
+        InterventionAction::Continue
+    );
+    assert!(projection.last_anchor_sequence > 0);
+    let events = runtime_after_restart.events(run_id).await.unwrap();
+    assert_eq!(
+        events.iter().filter(|event| event.event.name() == "state_decay_assessed").count(),
+        2
+    );
 }

@@ -545,7 +545,9 @@ impl EventStore for PostgresEventStore {
 mod tests {
     use std::env;
 
-    use horizon_core::{EventKind, NewEvent, RunId};
+    use horizon_core::{
+        EventKind, InterventionAction, InterventionAssessment, NewEvent, RunId, StateDecaySignals,
+    };
 
     use super::*;
 
@@ -563,14 +565,33 @@ mod tests {
             .append_many_if_sequence(
                 vec![
                     NewEvent::new(run_id, EventKind::RunCreated { goal: "postgres".into() }),
-                    NewEvent::new(run_id, EventKind::Note { message: "durable".into() }),
+                    NewEvent::new(
+                        run_id,
+                        EventKind::StateDecayAssessed {
+                            assessment: InterventionAssessment {
+                                policy_id: "postgres-contract".into(),
+                                policy_version: Some("v1".into()),
+                                risk_score_milli: 700,
+                                threshold_milli: 600,
+                                signals: StateDecaySignals {
+                                    context_pressure: 0.7,
+                                    ..Default::default()
+                                },
+                                action: InterventionAction::InjectAnchor,
+                                reason: "exercise JSONB event round trip".into(),
+                                metadata: serde_json::json!({"source": "integration-test"}),
+                            },
+                        },
+                    ),
                 ],
                 0,
             )
             .await
             .unwrap();
         assert_eq!(appended.iter().map(|event| event.sequence).collect::<Vec<_>>(), [1, 2]);
-        assert_eq!(store.load_events(run_id, 0).await.unwrap().len(), 2);
+        let events = store.load_events(run_id, 0).await.unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[1].event, EventKind::StateDecayAssessed { .. }));
         assert!(store.schema_version().await.unwrap() >= 2);
     }
 }

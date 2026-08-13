@@ -8,7 +8,7 @@ from typing import Any, Mapping, Optional, Sequence
 from uuid import uuid4
 
 from .client import HorizonClient
-from .memory import InterventionTracker
+from .memory import InterventionTracker, LearnedInterventionPolicy
 from .policies import AgentAction, JsonActionPolicy
 from .providers.base import LlmProvider
 
@@ -38,6 +38,7 @@ _RUNTIME_COMMANDS = frozenset(
         "record_tool_result",
         "update_budget",
         "update_environment",
+        "apply_intervention",
         "suspend",
     }
 )
@@ -50,6 +51,10 @@ class AgentConfig:
     token_budget: Optional[int] = None
     wall_time_budget_ms: Optional[int] = None
     checkpoint_on_finish: bool = True
+    # Optional offline-trained state-decay policy. The default remains the Rust
+    # heuristic so existing HTTP/native deployments retain their current
+    # behavior until an experiment explicitly supplies a trained model.
+    learned_intervention_policy: Optional[LearnedInterventionPolicy] = None
 
 
 @dataclass
@@ -131,15 +136,10 @@ class DurableAgent:
                     "configured budget exhausted",
                 )
 
-            intervention = self.client.intervene_if_needed(run_id, **tracker.consume_boundary())
-            if intervention is not None:
-                anchors_injected += 1
-                context = self.client.state_anchor(run_id)["content"]
-                prompt = "A proactive State Anchor was injected. Use it as binding context:\n\n" + str(context)
-                context_kind = "state_anchor"
-            else:
-                prompt = self._compact_context(projection)
-                context_kind = "compact_projection"
+            prompt, context_kind, injected_anchor = self._context_for_boundary(
+                run_id, projection, tracker
+            )
+            anchors_injected += int(injected_anchor)
 
             operation_id = "llm:{}:{}".format(run_id, step)
             self.client.record_tool_invocation(
@@ -238,6 +238,82 @@ class DurableAgent:
             self._normalize_subgoal(data)
             tracker.note_subgoal_switch()
         self.client.command(run_id, action.action_type, data)
+
+    def _context_for_boundary(
+        self,
+        run_id: str,
+        projection: Mapping[str, Any],
+        tracker: InterventionTracker,
+    ) -> tuple[str, str, bool]:
+        """Choose compact vs State Anchor context at one durable boundary.
+
+        The default path delegates the whole decision to Rust's explainable
+        heuristic. A supplied learned policy runs in Python, then submits its
+        full assessment to Rust so both injected and skipped decisions are
+        durable, inspectable, and replayable.
+        """
+        compact_context = self._compact_context(projection)
+        learned_policy = self.config.learned_intervention_policy
+        if learned_policy is None:
+            intervention = self.client.intervene_if_needed(run_id, **tracker.consume_boundary())
+            if intervention is not None:
+                context = self.client.state_anchor(run_id)["content"]
+                return (
+                    "A proactive State Anchor was injected. Use it as binding context:\n\n"
+                    + str(context),
+                    "state_anchor",
+                    True,
+                )
+            return compact_context, "compact_projection", False
+
+        sequence = int(projection.get("sequence") or 0)
+        last_anchor_sequence = int(projection.get("last_anchor_sequence") or 0)
+        signals = tracker.consume_boundary(
+            steps_since_anchor=max(0, sequence - last_anchor_sequence)
+        )
+        immediate_context_pressure = min(
+            1.0,
+            learned_policy.controller.estimate_tokens(compact_context)
+            / learned_policy.controller.context_window_tokens,
+        )
+        # A total run budget can be unset even when the immediate prompt is
+        # becoming too large. Persist the stronger of the two pressures so the
+        # learned predictor sees the same context risk its controller uses.
+        signals["context_pressure"] = max(
+            float(signals["context_pressure"]), immediate_context_pressure
+        )
+        # Rendering a candidate anchor is a read-only request. It lets the
+        # controller account for the real token premium before deciding whether
+        # its durable injection is worth the cost.
+        anchor_context = str(self.client.state_anchor(run_id)["content"])
+        decision = learned_policy.decide(
+            signals,
+            compact_context=compact_context,
+            anchor_context=anchor_context,
+            run_budget_pressure=tracker.run_budget_pressure(),
+        )
+        outcome = self.client.apply_intervention(
+            run_id,
+            decision.as_runtime_assessment(
+                policy_id=learned_policy.policy_id,
+                policy_version=learned_policy.predictor.model_version,
+            ),
+        )
+        events = outcome.get("events", ())
+        injected_anchor = any(
+            isinstance(event, Mapping) and event.get("type") == "state_anchor_injected"
+            for event in events
+        )
+        if injected_anchor != decision.inject_anchor:
+            raise RuntimeError("runtime intervention outcome disagreed with the submitted policy action")
+        if injected_anchor:
+            return (
+                "A learned, budget-aware State Anchor was injected. Use it as binding context:\n\n"
+                + anchor_context,
+                "learned_state_anchor",
+                True,
+            )
+        return compact_context, "learned_compact_projection", False
 
     def _finish(self, run_id: str) -> None:
         state = str(self.client.get_run(run_id)["state"])

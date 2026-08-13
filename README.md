@@ -63,6 +63,8 @@ Its three core mechanisms are:
   external task adapters, and an OpenAI-compatible provider adapter.
 - Structured terminal tool results and optional OTLP/HTTP spans emitted only
   after durable event commit.
+- Offline-trainable state-decay predictor and adaptive context-budget controller
+  whose every decision is durably auditable.
 - HorizonBench 30-task fixture, baseline/ablation smoke harness, metric scorer,
   and real cross-process fault-injection test.
 
@@ -271,10 +273,11 @@ experiments/          ablation-report scaffold
 
 ## Status and roadmap
 
-Horizon is a durable runtime and evaluation foundation. Planned research
-extensions include a learned intervention policy, adaptive context budgets,
-semantic-memory retrieval, external benchmark adapters, and cross-model/
-cross-domain experiments. See [roadmap](docs/roadmap.md).
+Horizon is a durable runtime and evaluation foundation. Its research-control
+baseline now includes an offline-trained intervention policy and adaptive
+context budgets; planned extensions are semantic-memory retrieval, external
+benchmark adapters, and cross-model/cross-domain experiments. See
+[roadmap](docs/roadmap.md).
 
 ## License
 

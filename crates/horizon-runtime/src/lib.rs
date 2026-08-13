@@ -17,8 +17,9 @@ use std::{collections::BTreeMap, sync::Arc};
 use chrono::Utc;
 use horizon_core::{
     AgentState, CURRENT_EVENT_SCHEMA_VERSION, CommandError, EventId, EventKind, EventRecord,
-    FailureRecord, NewEvent, ProjectionError, RunId, RunProjection, RuntimeCommand, TaskId,
-    TaskRecord, TaskSpecValidationError, TaskStatus, ToolResult, ToolResultStatus,
+    FailureRecord, InterventionAssessment, NewEvent, ProjectionError, RunId, RunProjection,
+    RuntimeCommand, TaskId, TaskRecord, TaskSpecValidationError, TaskStatus, ToolResult,
+    ToolResultStatus,
 };
 use horizon_memory::{DecaySignals, StateAnchorPolicy, matching_failure};
 use horizon_process::{ProcessOutput, ProcessRequest, ProcessSupervisor};
@@ -339,6 +340,18 @@ impl<S: EventStore + ?Sized> HorizonRuntime<S> {
         Ok(Some(CommandOutcome { events: vec![event], projection }))
     }
 
+    /// Persist an externally selected state-decay assessment and, when the
+    /// action requests it, inject a State Anchor rendered from this runtime's
+    /// durable projection. Python may own model training/inference, but it
+    /// cannot mutate state or fabricate anchor content outside this boundary.
+    pub async fn apply_intervention(
+        &self,
+        run_id: RunId,
+        assessment: InterventionAssessment,
+    ) -> Result<CommandOutcome, RuntimeError> {
+        self.dispatch(run_id, RuntimeCommand::ApplyIntervention { assessment }).await
+    }
+
     /// Returns a remembered non-retryable failure, allowing an external agent
     /// policy to block a known-bad strategy before it creates a side effect.
     pub async fn known_failure(
@@ -568,6 +581,21 @@ impl<S: EventStore + ?Sized> HorizonRuntime<S> {
             RuntimeCommand::UpdateEnvironment { environment } => {
                 Ok(vec![EventKind::EnvironmentUpdated { environment }])
             }
+            RuntimeCommand::ApplyIntervention { assessment } => {
+                validate_intervention_assessment(projection, &assessment)?;
+                let mut events =
+                    vec![EventKind::StateDecayAssessed { assessment: assessment.clone() }];
+                if assessment.action.injects_anchor() {
+                    events.push(EventKind::StateAnchorInjected {
+                        anchor: horizon_core::AnchorRecord {
+                            risk_score_milli: assessment.risk_score_milli,
+                            reason: assessment.reason,
+                            content: projection.cognitive.render_anchor(),
+                        },
+                    });
+                }
+                Ok(events)
+            }
             RuntimeCommand::Suspend { reason } => {
                 projection.state.validate_transition(AgentState::Suspended)?;
                 Ok(vec![
@@ -698,6 +726,47 @@ fn dependencies_succeeded(projection: &RunProjection, task: &TaskRecord) -> bool
             .get(dependency)
             .is_some_and(|dependency_task| dependency_task.status == TaskStatus::Succeeded)
     })
+}
+
+fn validate_intervention_assessment(
+    projection: &RunProjection,
+    assessment: &InterventionAssessment,
+) -> Result<(), RuntimeError> {
+    if assessment.policy_id.trim().is_empty() {
+        return Err(RuntimeError::InvalidCommand("intervention policy_id cannot be empty"));
+    }
+    if assessment.policy_version.as_deref().is_some_and(|version| version.trim().is_empty()) {
+        return Err(RuntimeError::InvalidCommand("intervention policy_version cannot be empty"));
+    }
+    if assessment.risk_score_milli > 1_000 || assessment.threshold_milli > 1_000 {
+        return Err(RuntimeError::InvalidCommand(
+            "intervention risk and threshold must be between 0 and 1000",
+        ));
+    }
+    if !assessment.signals.context_pressure.is_finite()
+        || !(0.0..=1.0).contains(&assessment.signals.context_pressure)
+    {
+        return Err(RuntimeError::InvalidCommand(
+            "intervention context_pressure must be a finite value between 0 and 1",
+        ));
+    }
+    let expected_anchor_distance =
+        projection.sequence.saturating_sub(projection.last_anchor_sequence);
+    if assessment.signals.steps_since_anchor != expected_anchor_distance {
+        return Err(RuntimeError::InvalidCommand(
+            "intervention steps_since_anchor must match the durable projection",
+        ));
+    }
+    if assessment.reason.trim().is_empty() {
+        return Err(RuntimeError::InvalidCommand("intervention reason cannot be empty"));
+    }
+    let should_inject = assessment.risk_score_milli >= assessment.threshold_milli;
+    if assessment.action.injects_anchor() != should_inject {
+        return Err(RuntimeError::InvalidCommand(
+            "intervention action must agree with whether risk is at or above its threshold",
+        ));
+    }
+    Ok(())
 }
 
 /// Applies prospective event kinds to a cloned projection without writing them.
@@ -1043,7 +1112,8 @@ mod tests {
     use std::sync::Arc;
 
     use horizon_core::{
-        AgentState, Constraint, RuntimeCommand, TaskSpec, TaskStatus, ToolResult, ToolResultStatus,
+        AgentState, Constraint, InterventionAction, InterventionAssessment, RuntimeCommand,
+        StateDecaySignals, TaskSpec, TaskStatus, ToolResult, ToolResultStatus,
     };
     use horizon_store::SqliteEventStore;
 
@@ -1287,6 +1357,124 @@ mod tests {
         assert!(projection.is_operation_completed("adapter-42"));
         assert_eq!(projection.tool_results.len(), 1);
         assert_eq!(projection.tool_results[0].duration_ms, Some(12));
+    }
+
+    #[tokio::test]
+    async fn learned_intervention_is_a_durable_assessment_and_anchor_boundary() {
+        let runtime = runtime().await;
+        let run_id =
+            runtime.create_run("apply a learned intervention").await.unwrap().projection.run_id;
+        let outcome = runtime
+            .apply_intervention(
+                run_id,
+                InterventionAssessment {
+                    policy_id: "logistic_state_decay".into(),
+                    policy_version: Some("fixture-v1".into()),
+                    risk_score_milli: 810,
+                    threshold_milli: 640,
+                    signals: StateDecaySignals {
+                        steps_since_anchor: 1,
+                        context_pressure: 0.72,
+                        subgoal_switches: 2,
+                        recent_failures: 1,
+                        recovered_session: false,
+                    },
+                    action: InterventionAction::InjectAnchor,
+                    reason: "learned risk exceeded the adaptive budget threshold".into(),
+                    metadata: serde_json::json!({
+                        "estimated_anchor_tokens": 120,
+                        "controller": "adaptive_context_budget_v1",
+                    }),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(outcome.events.len(), 2);
+        assert!(matches!(outcome.events[0].event, EventKind::StateDecayAssessed { .. }));
+        assert!(matches!(outcome.events[1].event, EventKind::StateAnchorInjected { .. }));
+        let projection = runtime.projection(run_id).await.unwrap();
+        assert_eq!(projection.intervention_assessments, 1);
+        assert_eq!(projection.last_anchor_sequence, outcome.events[1].sequence);
+        assert_eq!(
+            projection.last_intervention_assessment.unwrap().policy_id,
+            "logistic_state_decay"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_an_anchor_request_below_its_declared_risk_threshold() {
+        let runtime = runtime().await;
+        let run_id =
+            runtime.create_run("reject invalid intervention").await.unwrap().projection.run_id;
+        let error = runtime
+            .apply_intervention(
+                run_id,
+                InterventionAssessment {
+                    policy_id: "logistic_state_decay".into(),
+                    policy_version: None,
+                    risk_score_milli: 499,
+                    threshold_milli: 500,
+                    signals: StateDecaySignals { steps_since_anchor: 1, ..Default::default() },
+                    action: InterventionAction::InjectAnchor,
+                    reason: "invalid test decision".into(),
+                    metadata: serde_json::Value::Null,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, RuntimeError::InvalidCommand(_)));
+    }
+
+    #[tokio::test]
+    async fn rejects_a_continue_decision_above_its_declared_risk_threshold() {
+        let runtime = runtime().await;
+        let run_id = runtime
+            .create_run("reject inconsistent continue intervention")
+            .await
+            .unwrap()
+            .projection
+            .run_id;
+        let error = runtime
+            .apply_intervention(
+                run_id,
+                InterventionAssessment {
+                    policy_id: "logistic_state_decay".into(),
+                    policy_version: None,
+                    risk_score_milli: 800,
+                    threshold_milli: 500,
+                    signals: StateDecaySignals { steps_since_anchor: 1, ..Default::default() },
+                    action: InterventionAction::Continue,
+                    reason: "invalid test decision".into(),
+                    metadata: serde_json::Value::Null,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, RuntimeError::InvalidCommand(_)));
+    }
+
+    #[tokio::test]
+    async fn rejects_an_intervention_with_a_forged_anchor_distance() {
+        let runtime = runtime().await;
+        let run_id =
+            runtime.create_run("reject forged anchor distance").await.unwrap().projection.run_id;
+        let error = runtime
+            .apply_intervention(
+                run_id,
+                InterventionAssessment {
+                    policy_id: "logistic_state_decay".into(),
+                    policy_version: None,
+                    risk_score_milli: 100,
+                    threshold_milli: 500,
+                    signals: StateDecaySignals { steps_since_anchor: 99, ..Default::default() },
+                    action: InterventionAction::Continue,
+                    reason: "invalid test decision".into(),
+                    metadata: serde_json::Value::Null,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, RuntimeError::InvalidCommand(_)));
     }
 
     #[tokio::test]

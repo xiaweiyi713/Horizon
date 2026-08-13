@@ -116,6 +116,16 @@ Python-owned external systems use `AdapterRegistry`. The registry writes
 it, using the same stable operation ID as recovery/idempotency logic. This keeps
 adapters outside Rust's policy boundary without losing durable audit semantics.
 
+## Learned intervention boundary
+
+`horizon_agent.memory` can train a small offline logistic state-decay predictor
+and combine its risk score with an adaptive context-budget controller. The
+controller runs in Python because it is experimental policy logic. It sends a
+typed `InterventionAssessment` to Rust, which validates score/threshold ranges,
+persists `StateDecayAssessed`, and renders the State Anchor from the current
+projection only when the requested action is valid. This records both action and
+inaction without granting a model mutable access to cognitive state.
+
 ## Python bindings
 
 HTTP remains the default integration contract. The optional `horizon_native`

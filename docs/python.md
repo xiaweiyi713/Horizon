@@ -94,6 +94,74 @@ PY
 `HorizonClient`, including `DurableAgent` compatibility. It does not bypass the
 Rust state machine or event store; it merely removes the localhost HTTP hop.
 
+## Learned state-decay policy
+
+The research layer includes a dependency-free logistic predictor over the
+durable decay signals: anchor distance, context pressure, subgoal switching,
+recent failures, and recovery. It is deliberately **offline-trained**. Do not
+call a fitted model "learned" without keeping its training labels, revision,
+and a run/model-disjoint validation set.
+
+Each JSONL training row has this shape:
+
+```json
+{
+  "signals": {
+    "steps_since_anchor": 11,
+    "context_pressure": 0.82,
+    "subgoal_switches": 2,
+    "recent_failures": 1,
+    "recovered_session": false
+  },
+  "decayed": true
+}
+```
+
+Train a reproducible artifact and, when available, evaluate it on separately
+collected labels:
+
+```bash
+PYTHONPATH=python python3 -m horizon_agent.memory.train_decay \
+  examples/state-decay-labels.jsonl \
+  --output results/decay-model.json \
+  --model-version experiment-2026-08-13
+```
+
+The bundled label file only demonstrates the artifact format; it is not an
+empirical dataset. Load a real held-out model into a `DurableAgent` as follows:
+
+```python
+from pathlib import Path
+
+from horizon_agent import AgentConfig, DurableAgent, HorizonClient
+from horizon_agent.memory import (
+    AdaptiveContextBudgetController,
+    LearnedInterventionPolicy,
+    LogisticDecayPredictor,
+)
+
+predictor = LogisticDecayPredictor.load(Path("results/decay-model.json"))
+agent = DurableAgent(
+    HorizonClient(),
+    provider,
+    config=AgentConfig(
+        learned_intervention_policy=LearnedInterventionPolicy(
+            predictor=predictor,
+            controller=AdaptiveContextBudgetController(context_window_tokens=8192),
+        )
+    ),
+)
+```
+
+At every learned-policy boundary, Python estimates compact-versus-anchor token
+cost and submits a complete assessment to Rust. Rust validates it and persists
+`state_decay_assessed`; if the action is `inject_anchor`, it commits the
+assessment and a Rust-rendered `state_anchor_injected` event together. Thus a
+skipped intervention is just as auditable as an injected one, and Python never
+writes anchor content directly. The persisted action must agree with the
+assessment's risk/threshold comparison, preventing an audit record from claiming
+to skip a boundary that its own policy threshold says should inject.
+
 ## Budgets
 
 The Python loop records observed token/wall-time usage in durable state and

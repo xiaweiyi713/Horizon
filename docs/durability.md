@@ -63,6 +63,12 @@ upcast boundary. This permits future releases to understand older immutable
 events without rewriting historical records. PostgreSQL uses the same schema and
 event contract as SQLite, including expected-sequence conflict detection.
 
+The current event vocabulary is schema v2: v1 histories are still decoded
+through an explicit identity upcast, while v2 adds durable
+`state_decay_assessed` records for learned-policy research. Snapshot projection
+fields for those assessments use Serde defaults, so v0.2 snapshots remain
+readable and replay their v1 event suffix correctly.
+
 ## Operational notes
 
 - SQLite is a local single-file backend. Back up `.db`, `-wal`, and

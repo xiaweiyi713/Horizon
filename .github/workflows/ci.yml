@@ -49,7 +49,21 @@ jobs:
           PYTHONPATH=python python3 - <<'PY'
           from horizon_agent import NativeHorizonRuntime
           runtime = NativeHorizonRuntime(":memory:", checkpoint_every=0)
-          assert runtime.create_run("native CI")["projection"]["cognitive"]["primary_goal"] == "native CI"
+          created = runtime.create_run("native CI")
+          run_id = created["projection"]["run_id"]
+          assert created["projection"]["cognitive"]["primary_goal"] == "native CI"
+          outcome = runtime.apply_intervention(run_id, {
+              "policy_id": "ci-contract",
+              "policy_version": "v1",
+              "risk_score_milli": 800,
+              "threshold_milli": 700,
+              "signals": {"steps_since_anchor": 1, "context_pressure": 0.8},
+              "action": "inject_anchor",
+              "reason": "validate native learned-intervention command",
+          })
+          assert [event["type"] for event in outcome["events"]] == [
+              "state_decay_assessed", "state_anchor_injected"
+          ]
           PY
       - name: Python tests
         run: PYTHONPATH=python:. python3 -m unittest discover -s tests -p 'test_*.py' -v

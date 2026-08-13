@@ -21,6 +21,15 @@ class InterventionTracker:
             return 0.0
         return max(0.0, min(1.0, self.tokens_used / self.context_budget_tokens))
 
+    def run_budget_pressure(self) -> float:
+        """Fraction of the configured total agent token budget consumed.
+
+        ``context_pressure`` remains the backwards-compatible signal name sent
+        to the Rust heuristic. Learned controllers can use this explicit name
+        alongside their estimate of the immediate prompt's context pressure.
+        """
+        return self.context_pressure()
+
     def note_response(self, input_tokens: int, output_tokens: int) -> None:
         self.tokens_used += max(0, input_tokens) + max(0, output_tokens)
 
@@ -30,9 +39,10 @@ class InterventionTracker:
     def note_failure(self) -> None:
         self.recent_failures += 1
 
-    def consume_boundary(self) -> dict[str, object]:
+    def consume_boundary(self, *, steps_since_anchor: int = 0) -> dict[str, object]:
         """Return signals for one boundary and decay short-lived indicators."""
         result = {
+            "steps_since_anchor": max(0, steps_since_anchor),
             "context_pressure": self.context_pressure(),
             "subgoal_switches": self.subgoal_switches,
             "recent_failures": self.recent_failures,

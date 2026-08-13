@@ -8,6 +8,7 @@ state-machine or persistence logic in Python.
 from .agent import AgentConfig, DurableAgent, RunResult
 from .adapters import AdapterError, AdapterRegistry, AdapterRequest, AdapterResult, FunctionAdapter
 from .client import HorizonApiError, HorizonClient
+from .memory import AdaptiveContextBudgetController, LearnedInterventionPolicy, LogisticDecayPredictor
 from .native import NativeHorizonRuntime, NativeRuntimeUnavailable
 
 __all__ = [
@@ -16,10 +17,13 @@ __all__ = [
     "AdapterRegistry",
     "AdapterRequest",
     "AdapterResult",
+    "AdaptiveContextBudgetController",
     "DurableAgent",
     "FunctionAdapter",
     "HorizonApiError",
     "HorizonClient",
+    "LearnedInterventionPolicy",
+    "LogisticDecayPredictor",
     "NativeHorizonRuntime",
     "NativeRuntimeUnavailable",
     "RunResult",

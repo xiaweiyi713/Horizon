@@ -59,6 +59,17 @@ class HorizonBenchTests(unittest.TestCase):
         self.assertIn("Horizon_minus_checkpoint_recovery", names)
         self.assertIn("Horizon_minus_structured_cognitive_state", names)
 
+    def test_research_controls_exercise_learned_adaptive_and_fixed_threshold_paths(self) -> None:
+        report = run_suite(load_scenarios(), default_strategies(include_ablations=False))
+        adaptive = report["strategies"]["Horizon_learned_adaptive"]
+        fixed = report["strategies"]["Horizon_learned_fixed_threshold"]
+        self.assertGreater(adaptive["anchors_injected"], 0)
+        self.assertGreater(fixed["anchors_injected"], 0)
+        # The fixture gives the adaptive controller a high-context boundary
+        # that the fixed-threshold control deliberately misses. This validates
+        # that the benchmark invokes distinct controller behavior, not aliases.
+        self.assertNotEqual(adaptive["anchors_injected"], fixed["anchors_injected"])
+
 
 if __name__ == "__main__":
     unittest.main()

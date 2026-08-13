@@ -288,6 +288,17 @@ class HorizonClient:
     def update_environment(self, run_id: str, environment: Json) -> Mapping[str, Json]:
         return self.command(run_id, "update_environment", {"environment": environment})
 
+    def apply_intervention(
+        self, run_id: str, assessment: Mapping[str, Json]
+    ) -> Mapping[str, Json]:
+        """Durably apply a policy-selected state-decay assessment.
+
+        The caller may run a learned policy in Python, but the Rust runtime
+        validates the assessment, writes the audit event, and renders any State
+        Anchor from the authoritative durable projection.
+        """
+        return self.command(run_id, "apply_intervention", {"assessment": dict(assessment)})
+
     def checkpoint(self, run_id: str) -> Mapping[str, Json]:
         return self._request("POST", f"/v1/runs/{run_id}/checkpoint", {})
 

@@ -14,8 +14,9 @@ mod task;
 pub use command::{CommandError, RuntimeCommand};
 pub use event::{
     AnchorRecord, BudgetState, CURRENT_EVENT_SCHEMA_VERSION, CognitiveState, Constraint,
-    DecisionRecord, EventKind, EventRecord, EvidenceRecord, FailureRecord, MemoryItem, MemoryKind,
-    NewEvent, Subgoal, ToolResult, ToolResultStatus,
+    DecisionRecord, EventKind, EventRecord, EvidenceRecord, FailureRecord, InterventionAction,
+    InterventionAssessment, MemoryItem, MemoryKind, NewEvent, StateDecaySignals, Subgoal,
+    ToolResult, ToolResultStatus,
 };
 pub use ids::{EventId, MemoryId, RunId, TaskId};
 pub use projection::{ProjectionError, RunProjection};

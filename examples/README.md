@@ -16,3 +16,9 @@ a real cross-process restart test.
 `bounded-process.yaml` demonstrates task-level `max_output_bytes` and a local
 CPU budget. See [operations](../docs/operations.md) for Docker and memory-limit
 semantics.
+
+`state-decay-labels.jsonl` is a deliberately tiny **illustrative** label file
+for the offline state-decay trainer. It validates the model artifact workflow;
+it is not an empirical training or benchmark dataset. See
+[Python research controls](../docs/python.md#learned-state-decay-policy) for
+the required run/model-disjoint evaluation protocol.

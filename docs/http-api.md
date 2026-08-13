@@ -65,6 +65,46 @@ command for a structured terminal result:
 }
 ```
 
+## Learned intervention command
+
+An offline-trained Python policy submits each decision through
+`apply_intervention`. Rust rejects malformed scores and renders any anchor from
+the durable projection itself:
+
+```json
+{
+  "type": "apply_intervention",
+  "data": {
+    "assessment": {
+      "policy_id": "logistic_state_decay",
+      "policy_version": "experiment-42",
+      "risk_score_milli": 810,
+      "threshold_milli": 640,
+      "signals": {
+        "steps_since_anchor": 8,
+        "context_pressure": 0.72,
+        "subgoal_switches": 2,
+        "recent_failures": 1,
+        "recovered_session": false
+      },
+      "action": "inject_anchor",
+      "reason": "learned risk crossed the adaptive budget threshold",
+      "metadata": {
+        "estimated_anchor_tokens": 120,
+        "context_window_tokens": 8192
+      }
+    }
+  }
+}
+```
+
+Every accepted assessment emits `state_decay_assessed`. An `inject_anchor`
+decision additionally emits `state_anchor_injected` in the same durable command
+batch. Its action must agree with the declared risk/threshold comparison; an
+inconsistent request is rejected with HTTP 422. Rust also verifies that
+`steps_since_anchor` equals the current durable event distance, so policies must
+reload and reassess after a concurrent mutation rather than submit stale input.
+
 ## Intervention request
 
 ```json

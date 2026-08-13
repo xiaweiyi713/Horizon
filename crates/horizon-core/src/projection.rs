@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    AgentState, CognitiveState, EventKind, EventRecord, RunId, TaskId, TaskRecord, TaskStatus,
-    ToolResult,
+    AgentState, CognitiveState, EventKind, EventRecord, InterventionAssessment, RunId, TaskId,
+    TaskRecord, TaskStatus, ToolResult,
 };
 
 /// Materialized, deterministic view of a run. It can always be rebuilt from
@@ -27,6 +27,13 @@ pub struct RunProjection {
     /// stream remains authoritative for a full audit.
     #[serde(default)]
     pub tool_results: Vec<ToolResult>,
+    /// Number of policy boundaries durably assessed for behavioral state decay.
+    #[serde(default)]
+    pub intervention_assessments: u64,
+    /// Latest assessment, retained in the projection for operational inspection.
+    /// The immutable event stream remains the full training/audit source.
+    #[serde(default)]
+    pub last_intervention_assessment: Option<InterventionAssessment>,
     /// Sequence of the last checkpoint event applied to this projection. It is
     /// persisted in snapshots so checkpoint cadence is not distorted by the
     /// checkpoint event itself.
@@ -48,6 +55,8 @@ impl RunProjection {
             tasks: BTreeMap::new(),
             completed_operations: BTreeSet::new(),
             tool_results: Vec::new(),
+            intervention_assessments: 0,
+            last_intervention_assessment: None,
             last_checkpoint_sequence: 0,
             last_anchor_sequence: 0,
         }
@@ -202,6 +211,10 @@ impl RunProjection {
             EventKind::EnvironmentUpdated { environment } => {
                 self.cognitive.environment = environment.clone()
             }
+            EventKind::StateDecayAssessed { assessment } => {
+                self.intervention_assessments = self.intervention_assessments.saturating_add(1);
+                self.last_intervention_assessment = Some(assessment.clone());
+            }
             EventKind::StateAnchorInjected { .. } => self.last_anchor_sequence = record.sequence,
             EventKind::AgentSuspended { .. }
             | EventKind::AgentRecovered { .. }
@@ -291,5 +304,22 @@ mod tests {
         assert_eq!(projection.sequence, 2);
         assert_eq!(projection.state, AgentState::Planning);
         assert_eq!(projection.cognitive.primary_goal.as_deref(), Some("ship"));
+    }
+
+    #[test]
+    fn v0_2_snapshot_without_learned_intervention_fields_remains_readable() {
+        let run_id = RunId::new();
+        let projection = RunProjection::empty(run_id);
+        let mut snapshot = serde_json::to_value(projection).unwrap();
+        let object = snapshot.as_object_mut().unwrap();
+        // Simulate a v0.2 checkpoint created before these projection fields
+        // existed. Snapshot decoding depends on Serde defaults rather than a
+        // destructive rewrite of operator data.
+        object.remove("intervention_assessments");
+        object.remove("last_intervention_assessment");
+        let decoded: RunProjection = serde_json::from_value(snapshot).unwrap();
+        assert_eq!(decoded.run_id, run_id);
+        assert_eq!(decoded.intervention_assessments, 0);
+        assert_eq!(decoded.last_intervention_assessment, None);
     }
 }

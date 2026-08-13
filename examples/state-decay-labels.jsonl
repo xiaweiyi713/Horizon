@@ -1,0 +1,8 @@
+{"signals":{"steps_since_anchor":1,"context_pressure":0.05,"subgoal_switches":0,"recent_failures":0,"recovered_session":false},"decayed":false}
+{"signals":{"steps_since_anchor":3,"context_pressure":0.15,"subgoal_switches":0,"recent_failures":0,"recovered_session":false},"decayed":false}
+{"signals":{"steps_since_anchor":5,"context_pressure":0.20,"subgoal_switches":1,"recent_failures":0,"recovered_session":false},"decayed":false}
+{"signals":{"steps_since_anchor":2,"context_pressure":0.25,"subgoal_switches":0,"recent_failures":1,"recovered_session":false},"decayed":false}
+{"signals":{"steps_since_anchor":11,"context_pressure":0.82,"subgoal_switches":2,"recent_failures":1,"recovered_session":false},"decayed":true}
+{"signals":{"steps_since_anchor":12,"context_pressure":0.93,"subgoal_switches":3,"recent_failures":2,"recovered_session":true},"decayed":true}
+{"signals":{"steps_since_anchor":8,"context_pressure":0.75,"subgoal_switches":2,"recent_failures":2,"recovered_session":false},"decayed":true}
+{"signals":{"steps_since_anchor":6,"context_pressure":0.70,"subgoal_switches":3,"recent_failures":0,"recovered_session":true},"decayed":true}

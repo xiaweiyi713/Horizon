@@ -26,6 +26,11 @@ sys.path.insert(0, str(ROOT / "python"))
 
 from horizon_agent.client import HorizonApiError, HorizonClient  # noqa: E402
 from horizon_agent.agent import AgentConfig, DurableAgent  # noqa: E402
+from horizon_agent.memory import (  # noqa: E402
+    AdaptiveContextBudgetController,
+    LearnedInterventionPolicy,
+    LogisticDecayPredictor,
+)
 from horizon_agent.providers import ScriptedProvider  # noqa: E402
 
 
@@ -201,6 +206,63 @@ def assert_python_policy_loop(client: HorizonClient) -> None:
     assert event_types.count("tool_result_recorded") == 2, event_types
 
 
+def assert_learned_intervention_policy(client: HorizonClient) -> None:
+    """Exercise Python prediction -> Rust assessment -> Rust anchor rendering."""
+    predictor = LogisticDecayPredictor(
+        # A deliberately obvious fixture model: this verifies the durable data
+        # path, not a claim about empirical model quality.
+        weights=(4.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        model_version="fault-fixture-v1",
+    )
+    policy = LearnedInterventionPolicy(
+        predictor=predictor,
+        controller=AdaptiveContextBudgetController(context_window_tokens=256),
+    )
+    result = DurableAgent(
+        client,
+        ScriptedProvider([{"action": {"type": "finish", "data": {}}}]),
+        config=AgentConfig(
+            max_steps=2,
+            checkpoint_on_finish=False,
+            learned_intervention_policy=policy,
+        ),
+    ).run("Persist learned state-decay intervention decisions")
+    assert result.state == "completed" and result.anchors_injected == 1, result
+    projection = client.get_run(result.run_id)
+    assert projection["intervention_assessments"] == 1, projection
+    assert projection["last_intervention_assessment"]["policy_id"] == "logistic_state_decay", projection
+    events = client.events(result.run_id)
+    event_types = [event["type"] for event in events]
+    assert event_types.count("state_decay_assessed") == 1, event_types
+    assert event_types.count("state_anchor_injected") == 1, event_types
+
+    # The same HTTP path must durably record a deliberate *non*-intervention.
+    low_risk_policy = LearnedInterventionPolicy(
+        predictor=LogisticDecayPredictor(
+            weights=(-4.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+            model_version="fault-fixture-low-risk-v1",
+        ),
+        controller=AdaptiveContextBudgetController(context_window_tokens=256),
+    )
+    low_risk_result = DurableAgent(
+        client,
+        ScriptedProvider([{"action": {"type": "finish", "data": {}}}]),
+        config=AgentConfig(
+            max_steps=2,
+            checkpoint_on_finish=False,
+            learned_intervention_policy=low_risk_policy,
+        ),
+    ).run("Persist learned decisions even when no anchor is needed")
+    assert low_risk_result.state == "completed" and low_risk_result.anchors_injected == 0, low_risk_result
+    low_risk_events = client.events(low_risk_result.run_id)
+    low_risk_assessments = [
+        event for event in low_risk_events if event["type"] == "state_decay_assessed"
+    ]
+    assert len(low_risk_assessments) == 1, low_risk_events
+    assert low_risk_assessments[0]["data"]["assessment"]["action"] == "continue", low_risk_assessments
+    assert not any(event["type"] == "state_anchor_injected" for event in low_risk_events), low_risk_events
+
+
 def main() -> None:
     executable = binary()
     address = free_address()
@@ -215,9 +277,13 @@ def main() -> None:
             assert_process_timeout(restarted_client)
             assert_output_cap(restarted_client)
             assert_python_policy_loop(restarted_client)
+            assert_learned_intervention_policy(restarted_client)
         finally:
             stop_server(server)
-    print("fault injection passed: crash/recovery + timeout + output cap + Python policy loop")
+    print(
+        "fault injection passed: crash/recovery + timeout + output cap + "
+        "Python policy loop + learned intervention boundary"
+    )
 
 
 if __name__ == "__main__":

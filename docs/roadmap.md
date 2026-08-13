@@ -18,10 +18,16 @@
 - PyO3 native SQLite runtime module alongside the stable HTTP contract
 - Python external task adapter registry and normalized tool-result schemas
 
+## v0.3 — implemented research-control baseline
+
+- Offline-trainable logistic state-decay predictor with serializable feature schema
+- Adaptive context-budget controller that accounts for immediate anchor cost
+- Durable `state_decay_assessed` events for both skipped and injected decisions
+- HTTP/native/Python policy integration plus held-out calibration metrics
+- HorizonBench learned-adaptive versus fixed-threshold research controls
+
 ## Research version
 
-- Learned state-decay predictor and learned intervention policy
-- Adaptive context-budget controller
 - Semantic-memory layer and retrieval ablations
 - Cross-model evaluation and held-out public benchmark adapters
 - Cross-domain long-horizon workflows and a technical report

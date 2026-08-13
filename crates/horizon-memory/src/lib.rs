@@ -7,21 +7,11 @@
 use horizon_core::{AnchorRecord, CognitiveState, FailureRecord};
 use serde::{Deserialize, Serialize};
 
-/// Observable factors that predict behavioral state decay at an execution
-/// boundary. Inputs are normalized where possible to keep configuration stable.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct DecaySignals {
-    /// Number of event boundaries since the last state anchor.
-    pub steps_since_anchor: u64,
-    /// Context use as a fraction in `[0, 1]`; values are clamped by the policy.
-    pub context_pressure: f32,
-    /// Number of recent switches between subgoals.
-    pub subgoal_switches: u32,
-    /// Number of recent task/tool failures.
-    pub recent_failures: u32,
-    /// True after a cross-process or cross-session restore.
-    pub recovered_session: bool,
-}
+/// Backwards-compatible policy-facing name for the durable domain signals.
+/// The type lives in `horizon-core` because learned policy assessments persist
+/// it in the event log; this crate remains responsible only for heuristic
+/// scoring and explanation.
+pub use horizon_core::StateDecaySignals as DecaySignals;
 
 /// Explainable implementation of `R_t = w1L + w2C + w3S + w4F + w5X`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

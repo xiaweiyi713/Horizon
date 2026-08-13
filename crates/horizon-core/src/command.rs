@@ -3,8 +3,8 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::{
-    AgentState, BudgetState, Constraint, DecisionRecord, EvidenceRecord, FailureRecord, MemoryItem,
-    Subgoal, TaskSpec, ToolResult,
+    AgentState, BudgetState, Constraint, DecisionRecord, EvidenceRecord, FailureRecord,
+    InterventionAssessment, MemoryItem, Subgoal, TaskSpec, ToolResult,
 };
 
 /// Commands are intent, never persisted truth. The runtime validates a command,
@@ -94,6 +94,12 @@ pub enum RuntimeCommand {
     },
     UpdateEnvironment {
         environment: Value,
+    },
+    /// Record an externally selected state-decay policy decision. Rust validates
+    /// the assessment, persists it, and renders the anchor from durable state
+    /// when the action requests one.
+    ApplyIntervention {
+        assessment: InterventionAssessment,
     },
     Suspend {
         reason: String,
