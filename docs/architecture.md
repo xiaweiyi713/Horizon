@@ -92,7 +92,8 @@ persisted as an event, so its trigger and contents are auditable.
 `horizon-scheduler` validates a dependency DAG, selects tasks whose dependencies
 have succeeded, orders by priority, and executes independent work under a Tokio
 semaphore. It never mutates durable state; only `horizon-runtime` writes task
-events.
+events. Tasks may also retain an optional parent task ID for hierarchical plan
+provenance; readiness is still defined solely by explicit dependencies.
 
 `horizon-process` receives argv vectors, a working directory, environment,
 timeout, and operation ID. It captures stdout/stderr, records an exit code or

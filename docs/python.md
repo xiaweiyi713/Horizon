@@ -39,6 +39,12 @@ The policy returns exactly one JSON action per boundary:
 materialized projection. Normal turns get a small execution summary; a full State
 Anchor is supplied only after the Rust policy signals an intervention.
 
+Each provider call is also recorded as durable `tool_invoked` and
+`tool_succeeded`/`tool_failed` telemetry with a per-step operation ID, token
+counts, and context size. Horizon intentionally records metadata rather than the
+full prompt or response, keeping the audit trail useful without making it a
+second transcript store.
+
 ## External tools
 
 For tools outside the Rust Process Supervisor, record durable audit events with

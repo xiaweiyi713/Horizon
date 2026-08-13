@@ -63,6 +63,10 @@ pub struct TaskTransitionError {
 pub struct TaskSpec {
     pub id: TaskId,
     pub title: String,
+    /// Optional logical parent for plan/tree visualizations. Scheduling remains
+    /// dependency-driven; this field preserves subtask provenance across replay.
+    #[serde(default)]
+    pub parent: Option<TaskId>,
     /// Stable logical operation identifier, reused across retries and supplied
     /// to child processes as `HORIZON_OPERATION_ID`. A task attempt is not an
     /// operation ID: attempts may be delivered at least once after recovery.
@@ -93,6 +97,7 @@ impl TaskSpec {
         Self {
             id,
             title: title.into(),
+            parent: None,
             operation_id: Some(format!("task:{id}")),
             command: None,
             working_dir: None,
@@ -138,5 +143,10 @@ mod tests {
         assert!(TaskStatus::Failed.can_transition_to(TaskStatus::Retrying));
         assert!(TaskStatus::Retrying.can_transition_to(TaskStatus::Pending));
         assert!(!TaskStatus::Succeeded.can_transition_to(TaskStatus::Running));
+    }
+
+    #[test]
+    fn new_tasks_have_no_parent_until_the_plan_assigns_one() {
+        assert_eq!(TaskSpec::new("root task").parent, None);
     }
 }

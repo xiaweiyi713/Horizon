@@ -135,10 +135,39 @@ class DurableAgent:
                 anchors_injected += 1
                 context = self.client.state_anchor(run_id)["content"]
                 prompt = "A proactive State Anchor was injected. Use it as binding context:\n\n" + str(context)
+                context_kind = "state_anchor"
             else:
                 prompt = self._compact_context(projection)
+                context_kind = "compact_projection"
 
-            action, response = self.policy.next_action(prompt)
+            operation_id = "llm:{}:{}".format(run_id, step)
+            self.client.record_tool_invocation(
+                run_id,
+                operation_id,
+                "llm_policy",
+                {"step": step, "context_kind": context_kind, "context_chars": len(prompt)},
+            )
+            try:
+                action, response = self.policy.next_action(prompt)
+            except Exception as error:
+                self.client.record_tool_failure(run_id, operation_id, str(error), retryable=True)
+                return RunResult(
+                    run_id,
+                    str(self.client.get_run(run_id)["state"]),
+                    step,
+                    tracker.tokens_used,
+                    anchors_injected,
+                    "LLM policy call failed: {}".format(error),
+                )
+            self.client.record_tool_success(
+                run_id,
+                operation_id,
+                {
+                    "input_tokens": response.input_tokens,
+                    "output_tokens": response.output_tokens,
+                    "response_chars": len(response.content),
+                },
+            )
             tracker.note_response(response.input_tokens, response.output_tokens)
             self._persist_budget(run_id, tracker, started_at)
             try:
@@ -232,6 +261,7 @@ class DurableAgent:
         if not isinstance(task, dict):
             raise ValueError("create_task requires a task object")
         task.setdefault("id", str(uuid4()))
+        task.setdefault("parent", None)
         task.setdefault("command", None)
         task.setdefault("working_dir", None)
         task.setdefault("priority", 0)

@@ -26,5 +26,6 @@ tasks:
     timeout_ms: 30000
 
   - name: summarize-results
+    parent: run-experiment
     depends_on: ["run-experiment"]
     command: ["sh", "-c", "printf 'wrote reproducible summary\\n'"]

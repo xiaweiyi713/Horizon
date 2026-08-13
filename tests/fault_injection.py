@@ -171,6 +171,10 @@ def assert_python_policy_loop(client: HorizonClient) -> None:
     assert result.state == "completed" and result.steps == 2, result
     projection = client.get_run(result.run_id)
     assert projection["cognitive"]["open_subgoals"], projection
+    events = client.events(result.run_id)
+    event_types = [event["type"] for event in events]
+    assert event_types.count("tool_invoked") == 2, event_types
+    assert event_types.count("tool_succeeded") == 2, event_types
 
 
 def main() -> None:

@@ -146,6 +146,10 @@ impl ConstraintFile {
 #[serde(deny_unknown_fields)]
 struct TaskFile {
     name: String,
+    /// Optional hierarchy-only parent. Unlike `depends_on`, this does not
+    /// affect scheduling readiness.
+    #[serde(default)]
+    parent: Option<String>,
     /// Stable idempotency key reused after a crash. Omit to derive one from the
     /// task UUID; provide one for an external system with its own key scheme.
     #[serde(default)]
@@ -294,6 +298,15 @@ fn resolve_tasks(raw_tasks: Vec<TaskFile>) -> Result<Vec<TaskSpec>> {
     raw_tasks
         .into_iter()
         .map(|task| {
+            let parent = task
+                .parent
+                .as_deref()
+                .map(|name| {
+                    ids.get(name).copied().with_context(|| {
+                        format!("task `{}` has unknown parent `{name}`", task.name)
+                    })
+                })
+                .transpose()?;
             let dependencies = task
                 .depends_on
                 .iter()
@@ -306,6 +319,7 @@ fn resolve_tasks(raw_tasks: Vec<TaskFile>) -> Result<Vec<TaskSpec>> {
             Ok(TaskSpec {
                 id: ids[&task.name],
                 title: task.name,
+                parent,
                 operation_id: task.operation_id,
                 command: task.command,
                 working_dir: task.working_dir,

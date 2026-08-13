@@ -55,7 +55,7 @@ Allowed actions:
 - set_plan: {"steps":["..."]}
 - open_subgoal: {"subgoal":{"id":"...","content":"...","completed":false}}
 - complete_subgoal: {"id":"..."}
-- create_task: {"task":{"id":"uuid","title":"...","command":["program","arg"],"dependencies":[],"priority":0,"max_retries":1,"timeout_ms":null,"working_dir":null}}
+- create_task: {"task":{"id":"uuid","title":"...","parent":null,"command":["program","arg"],"dependencies":[],"priority":0,"max_retries":1,"timeout_ms":null,"working_dir":null}}
 - start_task, block_task, unblock_task, succeed_task, fail_task, retry_task, cancel_task (with the runtime command fields)
 - remember_failure: {"failure":{"id":"...","approach":"...","reason":"...","operation_id":null,"retryable":false}}
 - record_decision: {"decision":{"id":"...","decision":"...","rationale":"..."}}

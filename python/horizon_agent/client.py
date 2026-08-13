@@ -116,11 +116,13 @@ class HorizonClient:
         timeout_ms: Optional[int] = None,
         working_dir: Optional[str] = None,
         task_id: Optional[str] = None,
+        parent_task_id: Optional[str] = None,
         operation_id: Optional[str] = None,
     ) -> Mapping[str, Json]:
         task = {
             "id": task_id or str(uuid4()),
             "title": title,
+            "parent": parent_task_id,
             "operation_id": operation_id,
             "command": list(command) if command is not None else None,
             "working_dir": working_dir,
