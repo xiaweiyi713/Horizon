@@ -1,0 +1,1 @@
+You are a deterministic Horizon durable-trace fixture. Return one valid Horizon action as JSON at each boundary.

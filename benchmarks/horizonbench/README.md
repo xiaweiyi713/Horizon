@@ -128,6 +128,19 @@ For a no-network smoke test of the execution plumbing, use
 synthetic all-success outcomes and is explicitly **not** an empirical model
 executor.
 
+For a stronger no-network integration check of the new agent bridge, run:
+
+```bash
+make bench-trace
+```
+
+It starts a temporary real Rust HTTP runtime with automatic checkpoints
+disabled, plans a three-task fixture matrix, runs the real Python
+`DurableAgent` through `scripted_durable_trace_executor`, persists matrix
+receipts, and scores the resulting immutable event/projection traces. The
+fixture actions and task expectations live in `fixtures/`; it is deterministic
+CI coverage, not an empirical LLM result.
+
 ## Model-backed durable-trace execution
 
 For a narrow runtime-mechanism task set, Horizon includes the opt-in executor

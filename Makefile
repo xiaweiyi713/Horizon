@@ -1,4 +1,4 @@
-.PHONY: build check test test-python fault bench demo fmt lint
+.PHONY: build check test test-python fault bench bench-trace demo fmt lint
 
 build:
 	cargo build --workspace --all-features
@@ -23,6 +23,9 @@ fault:
 
 bench:
 	python3 benchmarks/horizonbench/run.py --output-dir results/horizonbench
+
+bench-trace:
+	PYTHONPATH=python:. python3 -m unittest tests/test_durable_trace_matrix_integration.py -v
 
 demo:
 	cargo run -p horizon-cli -- --db horizon-demo.db demo

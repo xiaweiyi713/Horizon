@@ -87,6 +87,11 @@ self-assessment. It rejects non-empty fault schedules: a public task must use
 an environment executor that performs the declared fault and judges the
 resulting artifact/test outcome objectively.
 
+`make bench-trace` is the no-network end-to-end regression for this bridge. It
+starts the actual Rust HTTP runtime and uses a frozen scripted fixture to prove
+the matrix → agent → receipt → objective-judge path. Its outcomes are CI
+coverage only, never empirical model measurements.
+
 ## Cross-domain long-horizon workflow protocol
 
 The bundled `cross_domain_tasks.jsonl` fixture exercises the scoring path across

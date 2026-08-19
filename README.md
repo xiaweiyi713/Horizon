@@ -218,6 +218,10 @@ recovery.
 # Deterministic CI smoke harness: not an empirical model claim.
 python3 benchmarks/horizonbench/run.py --output-dir results/horizonbench
 
+# Starts the real Rust HTTP runtime and exercises the matrix/agent/trace-judge
+# bridge with deterministic fixture actions; still no model API call.
+make bench-trace
+
 # Planned full/ablation report scaffold.
 python3 experiments/run_ablation.py
 

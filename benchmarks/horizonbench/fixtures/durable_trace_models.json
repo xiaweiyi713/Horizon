@@ -1,0 +1,11 @@
+{
+  "models": [
+    {
+      "model_id": "scripted-durable-trace-fixture",
+      "provider": "scripted-fixture",
+      "model": "scripted-durable-trace",
+      "model_revision": "fixture-v1",
+      "decoding": {}
+    }
+  ]
+}

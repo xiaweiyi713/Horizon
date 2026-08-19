@@ -64,6 +64,13 @@
 - OpenAI-compatible opt-in executor that forwards validated decoding controls and matrix seed
 - Explicit rejection of fault schedules that the generic bridge cannot actually enact
 
+## v0.9 — implemented end-to-end durable-trace integration fixture
+
+- Three immutable scripted durable-trace tasks plus model/condition/prompt fixtures
+- No-network executor that deeply detaches frozen task metadata before policy serialization
+- Real Rust HTTP runtime matrix integration test covering agent actions, receipts, and objective trace scoring
+- `make bench-trace` reproducibility entry point for the complete bridge
+
 ## Research execution
 
 - Configure task-environment executors for selected model backbones, collect objective held-out outcomes, and publish the resulting technical report. Public artifact/domain tasks and fault schedules still require their own environment-specific judge.

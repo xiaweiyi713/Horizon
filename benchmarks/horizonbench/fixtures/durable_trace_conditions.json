@@ -1,0 +1,14 @@
+{
+  "conditions": [
+    {
+      "condition_id": "H-trace-fixture",
+      "policy_revision": "fixture-v1",
+      "configuration": {
+        "agent": {
+          "max_steps": 6,
+          "semantic_memory_limit": 0
+        }
+      }
+    }
+  ]
+}
