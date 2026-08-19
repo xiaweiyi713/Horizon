@@ -69,6 +69,17 @@ checkpoint cadence, fault schedule, runtime revision, and optional JSON-safe
 metadata such as a frozen memory-catalog hash. The manifest itself has a
 content SHA-256, so a changed setting cannot silently reuse an old run ID.
 
+Immediately before execution, run `preflight_matrix.py` against the same
+matrix, task source, and selected run IDs. It validates the exact task-set
+identity and calls an executor's explicit `execute.preflight(context)` hook for
+every frozen task, without calling `execute(context)`, writing a receipt, or
+contacting a runtime/model/task environment. A built-in trace preflight checks
+the prompt, agent condition, checkpoint cadence, trace expectation, provider
+profile, effective decoding/seed, and credential presence. Custom executors
+must keep both their module import and preflight hook equally static; executors
+without a hook are rejected by this command but remain compatible with the
+execution runner.
+
 Provider adapters remain outside Horizon; they must emit exactly one observed
 `EpisodeResult` per frozen task into `results/<run_id>.jsonl`. Score a single
 row with `score_runs.py --manifest-matrix MATRIX --run-id RUN_ID`, or score the

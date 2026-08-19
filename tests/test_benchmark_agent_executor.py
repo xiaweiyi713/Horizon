@@ -195,6 +195,46 @@ class BenchmarkAgentExecutorTests(unittest.TestCase):
             executor(_context(fault_schedule=[{"after_boundary": 3, "kind": "restart"}]))
         self.assertEqual(factory_calls, [])
 
+    def test_agent_executor_preflight_validates_static_inputs_without_factories(self) -> None:
+        context = _context(
+            metadata={
+                "initial_plan": ["recover checkpoint", "verify operation ID"],
+                "horizon_trace_expectation": {"required_event_types": ["checkpoint_created"]},
+            },
+            condition={"agent": {"max_steps": 7, "semantic_memory_limit": 0}},
+            checkpoint_cadence=2,
+        )
+        factory_calls: list[str] = []
+        executor = DurableAgentEpisodeExecutor(
+            client_factory=lambda _context: factory_calls.append("client") or object(),
+            provider_factory=lambda _context: factory_calls.append("provider") or object(),  # type: ignore[return-value]
+            judge=lambda *_args: {},
+        )
+
+        report = executor.preflight(context)
+
+        self.assertEqual(factory_calls, [])
+        self.assertEqual(report["task_id"], "durable-01")
+        self.assertEqual(report["checkpoint_cadence"], 2)
+        self.assertEqual(report["initial_plan_steps"], 2)
+        self.assertEqual(report["agent"]["checkpoint_every_steps"], 2)
+        self.assertEqual(report["agent"]["max_steps"], 7)
+
+    def test_trace_judge_preflight_checks_immutable_expectation(self) -> None:
+        context = _context(
+            metadata={
+                "horizon_trace_expectation": {
+                    "required_event_types": ["checkpoint_created"],
+                    "require_checkpoint": True,
+                }
+            }
+        )
+
+        report = DurableTraceJudge().preflight(context)
+
+        self.assertEqual(report["required_event_types"], ["checkpoint_created"])
+        self.assertTrue(report["require_checkpoint"])
+
     def test_compact_context_keeps_bounded_binding_facts_without_full_anchor(self) -> None:
         projection = {
             "state": "executing",

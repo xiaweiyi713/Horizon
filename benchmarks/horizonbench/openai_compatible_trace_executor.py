@@ -28,10 +28,10 @@ _DEFAULT_API_BASE_URL = "https://api.openai.com/v1"
 
 
 def _runtime_client(_context: Any) -> HorizonClient:
-    return HorizonClient(os.getenv("HORIZON_BENCH_RUNTIME_URL", _DEFAULT_RUNTIME_URL))
+    return HorizonClient(_configured_url("HORIZON_BENCH_RUNTIME_URL", _DEFAULT_RUNTIME_URL))
 
 
-def _provider(context: Any) -> OpenAICompatibleProvider:
+def _model_profile(context: Any) -> tuple[str, str]:
     manifest = getattr(context, "manifest", None)
     model = getattr(manifest, "model", None)
     provider_id = getattr(model, "provider", None)
@@ -43,6 +43,11 @@ def _provider(context: Any) -> OpenAICompatibleProvider:
     model_name = getattr(model, "model", None)
     if not isinstance(model_name, str) or not model_name.strip():
         raise BenchmarkExecutionError("execution context must expose a non-empty manifest.model.model")
+    return provider_id, model_name
+
+
+def _provider(context: Any) -> OpenAICompatibleProvider:
+    _provider_id, model_name = _model_profile(context)
     return OpenAICompatibleProvider(
         model_name,
         api_key=os.getenv("HORIZON_BENCH_API_KEY"),
@@ -73,10 +78,33 @@ def _effective_decoding(context: Any) -> dict[str, Any]:
     return effective
 
 
+def _configured_api_key() -> tuple[str, str]:
+    """Resolve the same credential fallback the provider will use, without exposing it."""
+
+    value = os.getenv("HORIZON_BENCH_API_KEY")
+    source = "HORIZON_BENCH_API_KEY"
+    if value is None:
+        value = os.getenv("OPENAI_API_KEY")
+        source = "OPENAI_API_KEY"
+    if not value:
+        raise BenchmarkExecutionError(
+            "configure HORIZON_BENCH_API_KEY or OPENAI_API_KEY before executing a model-backed matrix"
+        )
+    return value, source
+
+
+def _configured_url(name: str, default: str) -> str:
+    value = os.getenv(name, default)
+    if not value.strip():
+        raise BenchmarkExecutionError("{} must be a non-empty URL".format(name))
+    return value.rstrip("/")
+
+
+_JUDGE = DurableTraceJudge()
 _EXECUTOR = DurableAgentEpisodeExecutor(
     client_factory=_runtime_client,
     provider_factory=_provider,
-    judge=DurableTraceJudge(),
+    judge=_JUDGE,
 )
 
 
@@ -86,4 +114,43 @@ def execute(context: Any) -> Any:
     return _EXECUTOR(context)
 
 
-__all__ = ["execute"]
+def preflight(context: Any) -> dict[str, Any]:
+    """Validate a real-model trace row without connecting to any endpoint."""
+
+    report = _EXECUTOR.preflight(context)
+    trace_report = _JUDGE.preflight(context)
+    provider_id, model_name = _model_profile(context)
+    decoding = _effective_decoding(context)
+    api_key, credential_source = _configured_api_key()
+    api_base_url = _configured_url("HORIZON_BENCH_API_BASE_URL", _DEFAULT_API_BASE_URL)
+    runtime_url = _configured_url("HORIZON_BENCH_RUNTIME_URL", _DEFAULT_RUNTIME_URL)
+    # Constructor-only validation freezes the provider boundary but never calls
+    # ``complete`` or opens a runtime connection.
+    OpenAICompatibleProvider(
+        model_name,
+        api_key=api_key,
+        base_url=api_base_url,
+        decoding=decoding,
+    )
+    return {
+        **report,
+        "executor": "openai_compatible_durable_trace",
+        "provider": provider_id,
+        "model": model_name,
+        "credential_source": credential_source,
+        # URLs can themselves contain credentials, so record only that their
+        # validated configuration exists; never print them in a preflight log.
+        "api_base_url_configured": bool(api_base_url),
+        "runtime_url_configured": bool(runtime_url),
+        "decoding_keys": sorted(decoding),
+        "trace_expectation": trace_report,
+    }
+
+
+# ``load_executor`` returns the callable itself, so attach the optional
+# protocol hook to the same object rather than asking every runner to import
+# private plugin state.
+execute.preflight = preflight  # type: ignore[attr-defined]
+
+
+__all__ = ["execute", "preflight"]

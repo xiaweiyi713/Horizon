@@ -71,6 +71,22 @@
 - Real Rust HTTP runtime matrix integration test covering agent actions, receipts, and objective trace scoring
 - `make bench-trace` reproducibility entry point for the complete bridge
 
+## v1.0 — implemented execution preflight
+
+- Separate `preflight_matrix.py` command that verifies frozen matrix/task
+  identity and performs no execution, result writing, or receipt creation
+- Explicit JSON-safe `execute.preflight(context)` executor protocol, so a
+  matrix is rejected before the normal executor, provider, runtime, or task
+  environment can be invoked
+- Static durable-trace validation for task expectations, agent controls,
+  checkpoint cadence, model profile, decoding/seed, endpoint configuration,
+  and credential presence without exposing credential values
+- No-network scripted-fixture CLI regression and `make bench-preflight`
+  reproducibility entry point
+
 ## Research execution
 
-- Configure task-environment executors for selected model backbones, collect objective held-out outcomes, and publish the resulting technical report. Public artifact/domain tasks and fault schedules still require their own environment-specific judge.
+- Configure task-environment executors for selected model backbones, add their
+  static preflight hooks, collect objective held-out outcomes, and publish the
+  resulting technical report. Public artifact/domain tasks and fault schedules
+  still require their own environment-specific judge.

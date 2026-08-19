@@ -48,11 +48,40 @@ class ScriptedDurableTraceExecutorTests(unittest.TestCase):
         with self.assertRaisesRegex(BenchmarkExecutionError, "NaN or infinity"):
             plugin._detach_json(float("nan"), "fixture action")
 
+    def test_preflight_validates_fixture_actions_and_trace_without_starting_runtime(self) -> None:
+        context = SimpleNamespace(
+            task=SimpleNamespace(
+                task_id="trace-01",
+                category="goal_retention",
+                goal="Preserve the durable objective.",
+                constraint="Do not replace the operation ID.",
+                metadata={
+                    "initial_plan": ["finish fixture"],
+                    "horizon_trace_expectation": {"required_event_types": ["checkpoint_created"]},
+                    "fixture_actions": [{"action": {"type": "finish", "data": {}}}],
+                },
+            ),
+            manifest=SimpleNamespace(
+                condition=SimpleNamespace(configuration={"agent": {"max_steps": 2}}),
+                checkpoint_cadence=1,
+                fault_schedule=[],
+                prompt=SimpleNamespace(text="Return one durable action."),
+            ),
+        )
+
+        report = plugin.preflight(context)
+
+        self.assertEqual(report["executor"], "scripted_durable_trace_fixture")
+        self.assertFalse(report["model_call"])
+        self.assertEqual(report["fixture_action_count"], 1)
+        self.assertEqual(report["trace_expectation"]["required_event_types"], ["checkpoint_created"])
+
     def test_plugin_uses_the_standard_matrix_executor_import_shape(self) -> None:
         self.assertIs(
             load_executor("benchmarks.horizonbench.scripted_durable_trace_executor:execute"),
             plugin.execute,
         )
+        self.assertIs(plugin.execute.preflight, plugin.preflight)
 
 
 if __name__ == "__main__":

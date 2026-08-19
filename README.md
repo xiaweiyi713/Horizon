@@ -222,6 +222,10 @@ python3 benchmarks/horizonbench/run.py --output-dir results/horizonbench
 # bridge with deterministic fixture actions; still no model API call.
 make bench-trace
 
+# Validates a frozen durable-trace matrix through static executor hooks only:
+# no runtime, model, results, or receipt files are created.
+make bench-preflight
+
 # Planned full/ablation report scaffold.
 python3 experiments/run_ablation.py
 
@@ -230,6 +234,7 @@ python3 benchmarks/horizonbench/score_runs.py results/my-agent.jsonl
 
 # Plan and score a held-out cross-model experiment (provider-neutral).
 python3 benchmarks/horizonbench/plan_matrix.py --help
+python3 benchmarks/horizonbench/preflight_matrix.py --help
 python3 benchmarks/horizonbench/execute_matrix.py --help
 python3 benchmarks/horizonbench/score_matrix.py --help
 
@@ -297,7 +302,9 @@ manifest-bound cross-model evaluation protocol. Its resumable executor entry
 point atomically persists objective episode outcomes without treating model
 self-reports as evidence. The real-model durable-trace bridge makes the frozen
 prompt, decoding settings, seed, and checkpoint cadence effective for narrow
-runtime tasks; artifact/domain tasks and fault schedules still require a
+runtime tasks. A separate no-execution preflight validates each frozen
+manifest/task/provider boundary before an empirical run can create receipts or
+contact a model. Artifact/domain tasks and fault schedules still require a
 task-specific environment judge. The cross-domain suite adds workflow-level
 scoring and a provenance-preserving technical-report generator. See
 [roadmap](docs/roadmap.md).

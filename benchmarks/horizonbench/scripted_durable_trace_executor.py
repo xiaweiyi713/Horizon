@@ -25,11 +25,18 @@ _DEFAULT_RUNTIME_URL = "http://127.0.0.1:8787"
 _FIXTURE_ACTIONS_KEY = "fixture_actions"
 
 
+def _configured_runtime_url() -> str:
+    value = os.getenv("HORIZON_BENCH_RUNTIME_URL", _DEFAULT_RUNTIME_URL)
+    if not value.strip():
+        raise BenchmarkExecutionError("HORIZON_BENCH_RUNTIME_URL must be a non-empty URL")
+    return value.rstrip("/")
+
+
 def _runtime_client(_context: Any) -> HorizonClient:
-    return HorizonClient(os.getenv("HORIZON_BENCH_RUNTIME_URL", _DEFAULT_RUNTIME_URL))
+    return HorizonClient(_configured_runtime_url())
 
 
-def _provider(context: Any) -> ScriptedProvider:
+def _fixture_actions(context: Any) -> list[dict[str, Any]]:
     task = getattr(context, "task", None)
     metadata = getattr(task, "metadata", None)
     if not isinstance(metadata, Mapping):
@@ -50,7 +57,11 @@ def _provider(context: Any) -> ScriptedProvider:
         if not isinstance(detached, dict):  # Keeps the provider boundary narrow.
             raise BenchmarkExecutionError("fixture action {} must be an object".format(index))
         actions.append(detached)
-    return ScriptedProvider(actions)
+    return actions
+
+
+def _provider(context: Any) -> ScriptedProvider:
+    return ScriptedProvider(_fixture_actions(context))
 
 
 def _detach_json(value: Any, label: str) -> Any:
@@ -74,10 +85,11 @@ def _detach_json(value: Any, label: str) -> Any:
     raise BenchmarkExecutionError("{} is not JSON-safe".format(label))
 
 
+_JUDGE = DurableTraceJudge()
 _EXECUTOR = DurableAgentEpisodeExecutor(
     client_factory=_runtime_client,
     provider_factory=_provider,
-    judge=DurableTraceJudge(),
+    judge=_JUDGE,
 )
 
 
@@ -87,4 +99,23 @@ def execute(context: Any) -> Any:
     return _EXECUTOR(context)
 
 
-__all__ = ["execute"]
+def preflight(context: Any) -> dict[str, Any]:
+    """Validate deterministic fixture inputs without starting a runtime."""
+
+    report = _EXECUTOR.preflight(context)
+    actions = _fixture_actions(context)
+    runtime_url = _configured_runtime_url()
+    return {
+        **report,
+        "executor": "scripted_durable_trace_fixture",
+        "model_call": False,
+        "runtime_url_configured": bool(runtime_url),
+        "fixture_action_count": len(actions),
+        "trace_expectation": _JUDGE.preflight(context),
+    }
+
+
+execute.preflight = preflight  # type: ignore[attr-defined]
+
+
+__all__ = ["execute", "preflight"]

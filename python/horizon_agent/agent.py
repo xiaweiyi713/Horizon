@@ -75,6 +75,45 @@ class RunResult:
     error: Optional[str] = None
 
 
+def validate_agent_config(config: AgentConfig) -> None:
+    """Validate the configuration accepted by :class:`DurableAgent`.
+
+    Keeping this check outside the constructor lets a benchmark preflight use
+    exactly the same validation before it creates a provider or talks to the
+    durable runtime.
+    """
+
+    if not isinstance(config, AgentConfig):
+        raise ValueError("config must be an AgentConfig")
+    if (
+        isinstance(config.max_steps, bool)
+        or not isinstance(config.max_steps, int)
+        or config.max_steps < 1
+    ):
+        raise ValueError("max_steps must be a positive integer")
+    for field in ("token_budget", "wall_time_budget_ms"):
+        value = getattr(config, field)
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+        ):
+            raise ValueError("{} must be a non-negative integer or None".format(field))
+    if not isinstance(config.checkpoint_on_finish, bool):
+        raise ValueError("checkpoint_on_finish must be boolean")
+    if not isinstance(config.semantic_memory_limit, int) or isinstance(
+        config.semantic_memory_limit, bool
+    ):
+        raise ValueError("semantic_memory_limit must be an integer")
+    if not 0 <= config.semantic_memory_limit <= 8:
+        raise ValueError("semantic_memory_limit must be between 0 and 8")
+    if config.checkpoint_every_steps is not None:
+        if isinstance(config.checkpoint_every_steps, bool) or not isinstance(
+            config.checkpoint_every_steps, int
+        ):
+            raise ValueError("checkpoint_every_steps must be an integer or None")
+        if config.checkpoint_every_steps < 1:
+            raise ValueError("checkpoint_every_steps must be positive when supplied")
+
+
 class DurableAgent:
     """Execute an LLM policy without making it the source of durable truth.
 
@@ -95,19 +134,7 @@ class DurableAgent:
         self.client = client
         self.policy = JsonActionPolicy(provider, system_prompt=system_prompt)
         self.config = config or AgentConfig()
-        if not isinstance(self.config.semantic_memory_limit, int) or isinstance(
-            self.config.semantic_memory_limit, bool
-        ):
-            raise ValueError("semantic_memory_limit must be an integer")
-        if not 0 <= self.config.semantic_memory_limit <= 8:
-            raise ValueError("semantic_memory_limit must be between 0 and 8")
-        if self.config.checkpoint_every_steps is not None:
-            if isinstance(self.config.checkpoint_every_steps, bool) or not isinstance(
-                self.config.checkpoint_every_steps, int
-            ):
-                raise ValueError("checkpoint_every_steps must be an integer or None")
-            if self.config.checkpoint_every_steps < 1:
-                raise ValueError("checkpoint_every_steps must be positive when supplied")
+        validate_agent_config(self.config)
 
     def start(
         self,

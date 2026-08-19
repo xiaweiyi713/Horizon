@@ -10,8 +10,16 @@ from .protocol import (
     build_cross_model_matrix,
 )
 from .cross_domain_score import score_cross_domain
-from .execution import EpisodeExecutor, ExecutionContext, ExecutionValidationError, load_executor
+from .execution import (
+    EpisodeExecutor,
+    ExecutionContext,
+    ExecutionValidationError,
+    ExecutorPreflight,
+    load_executor,
+    preflight_executor,
+)
 from .execute_matrix import MatrixExecutionError, execute_manifest, execute_matrix
+from .preflight_matrix import PREFLIGHT_PROTOCOL, preflight_matrix
 from .render_report import render_technical_report
 from .score import BenchmarkMetrics, EpisodeResult, score_results
 from .workflows import (
@@ -30,6 +38,7 @@ __all__ = [
     "CrossDomainWorkflowSuite",
     "DEFAULT_CROSS_DOMAIN_TASKS",
     "EpisodeExecutor",
+    "ExecutorPreflight",
     "EpisodeResult",
     "EvaluationCondition",
     "ExecutionContext",
@@ -37,6 +46,7 @@ __all__ = [
     "JsonlTaskAdapter",
     "MatrixExecutionError",
     "ModelProfile",
+    "PREFLIGHT_PROTOCOL",
     "PromptArtifact",
     "RunManifest",
     "TaskSetIdentity",
@@ -47,6 +57,8 @@ __all__ = [
     "execute_manifest",
     "execute_matrix",
     "load_executor",
+    "preflight_executor",
+    "preflight_matrix",
     "load_cross_domain_workflows",
     "render_technical_report",
     "score_cross_domain",

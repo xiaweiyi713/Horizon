@@ -60,7 +60,7 @@ frozen held-out set.
 
 Create `models.json` with `model_id`, `provider`, `model`, `model_revision`,
 and a `decoding` object; create `conditions.json` with `condition_id`,
-`policy_revision`, and a `configuration` object. Then plan, execute, and score
+`policy_revision`, and a `configuration` object. Then plan, preflight, execute, and score
 the matrix:
 
 ```bash
@@ -71,6 +71,13 @@ python3 benchmarks/horizonbench/plan_matrix.py \
   --prompt prompts/system.txt --prompt-revision PROMPT_REVISION \
   --runtime-revision GIT_REVISION --seeds 1,2,3 \
   --output results/matrix.jsonl
+
+# Static validation only: no runtime/model/task execution, no results, and no
+# receipt files. The executor must expose execute.preflight(context).
+python3 benchmarks/horizonbench/preflight_matrix.py \
+  --matrix results/matrix.jsonl --tasks data/public-benchmark.jsonl \
+  --source-name PUBLIC_BENCHMARK --source-revision IMMUTABLE_RELEASE \
+  --executor my_experiment.executor:execute
 
 # The executor receives a frozen manifest/task context and must return an
 # environment-observed EpisodeResult, not an LLM self-assessment.
@@ -116,12 +123,37 @@ def execute(context):
     )
 ```
 
+Give the same callable a static preflight hook when it will be used through
+`preflight_matrix.py`:
+
+```python
+def preflight(context):
+    validate_local_task_metadata(context.task.metadata)
+    validate_frozen_provider_settings(context.manifest.model)
+    return {"ready": True, "provider_configured": True}
+
+execute.preflight = preflight
+```
+
 `execute_matrix.py` writes `<run_id>.jsonl` after every task and a matching
 `<run_id>.receipt.json` sidecar. It resumes only those receipt-bound outputs;
 the receipt binds the result set to the manifest hash, selected task-set hash,
 and executor import path. It rejects changed task sources, mismatched executors,
 duplicate/unexpected outcomes, and result files without a receipt. Pass
 `--overwrite` only to intentionally replace a completed or interrupted run.
+
+Run `preflight_matrix.py` immediately before an empirical execution. It loads
+the same frozen matrix and task source, validates their exact identity, and
+calls `execute.preflight(context)` once for every selected manifest/task pair.
+It never calls `execute(context)` and never writes results or receipts. A
+custom preflight hook and its module import must stay static: validate frozen
+prompt/condition/task metadata, credentials, provider controls, and local
+configuration there—but do not contact a model, runtime, or task environment.
+Return only non-sensitive status data: never put a key, credential-bearing URL,
+or provider response into the preflight report. The built-in scripted and
+OpenAI-compatible durable-trace executors provide this hook; legacy executors
+can still run through `execute_matrix.py` but are intentionally rejected by
+the preflight command until they add one.
 
 For a no-network smoke test of the execution plumbing, use
 `benchmarks.horizonbench.synthetic_fixture_executor:execute`. It returns
@@ -195,6 +227,14 @@ cargo run -p horizon-cli -- --db results/durable-trace.db --checkpoint-every 0 s
 export HORIZON_BENCH_RUNTIME_URL=http://127.0.0.1:8787
 export HORIZON_BENCH_API_BASE_URL=https://YOUR_COMPATIBLE_ENDPOINT/v1
 export HORIZON_BENCH_API_KEY=YOUR_KEY  # or use OPENAI_API_KEY
+
+# This checks the provider profile, effective seed/decoding, credential
+# presence, trace-task expectations, and frozen runtime settings without
+# sending a request or opening a runtime connection.
+PYTHONPATH=python:. python3 benchmarks/horizonbench/preflight_matrix.py \
+  --matrix results/matrix.jsonl --tasks data/durable-trace-tasks.jsonl \
+  --source-name DURABLE_TRACE_TASKS --source-revision IMMUTABLE_RELEASE \
+  --executor benchmarks.horizonbench.openai_compatible_trace_executor:execute
 
 PYTHONPATH=python:. python3 benchmarks/horizonbench/execute_matrix.py \
   --matrix results/matrix.jsonl --tasks data/durable-trace-tasks.jsonl \

@@ -126,7 +126,7 @@ def _task_index(task_set: BenchmarkTaskSet) -> dict[str, BenchmarkTask]:
     return {task.task_id: task for task in task_set.tasks}
 
 
-def _validate_task_set(manifest: RunManifest, task_set: BenchmarkTaskSet) -> None:
+def validate_manifest_task_set(manifest: RunManifest, task_set: BenchmarkTaskSet) -> None:
     identity = TaskSetIdentity.from_task_set(task_set)
     if manifest.task_set != identity:
         raise ExecutionValidationError(
@@ -410,7 +410,7 @@ def execute_manifest(
         raise ExecutionValidationError("executor must be callable")
     if not isinstance(executor_spec, str) or not executor_spec:
         raise ExecutionValidationError("executor_spec must be a non-empty string")
-    _validate_task_set(manifest, task_set)
+    validate_manifest_task_set(manifest, task_set)
     result_path, receipt_path = _result_paths(results_dir, manifest)
     if overwrite:
         _remove_output(result_path)
@@ -505,7 +505,7 @@ def execute_manifest(
     return _summary(manifest, result_path, receipt_path, executed_task_ids=executed_task_ids)
 
 
-def _select_manifests(manifests: Sequence[RunManifest], run_ids: Optional[Sequence[str]]) -> list[RunManifest]:
+def select_manifests(manifests: Sequence[RunManifest], run_ids: Optional[Sequence[str]]) -> list[RunManifest]:
     if not run_ids:
         return list(manifests)
     requested = list(run_ids)
@@ -533,10 +533,10 @@ def execute_matrix(
 ) -> dict[str, Any]:
     """Execute selected matrix rows, resuming only receipt-bound local outputs."""
 
-    manifests = _select_manifests(read_manifest_jsonl(matrix_path), run_ids)
+    manifests = select_manifests(read_manifest_jsonl(matrix_path), run_ids)
     task_set = JsonlTaskAdapter(source_name, source_revision).load(tasks_path, split=split)
     for manifest in manifests:
-        _validate_task_set(manifest, task_set)
+        validate_manifest_task_set(manifest, task_set)
     runs = [
         execute_manifest(
             manifest,

@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Mapping, Optional, Protocol, Sequence
 
-from .agent import AgentConfig, DurableAgent, RunResult
+from .agent import AgentConfig, DurableAgent, RunResult, validate_agent_config
 from .providers.base import LlmProvider
 
 
@@ -199,20 +199,10 @@ class DurableAgentEpisodeExecutor:
         self._agent_factory = agent_factory
 
     def __call__(self, context: Any) -> Json:
-        task = _task_from_context(context)
-        checkpoint_cadence = _checkpoint_cadence_from_manifest(context)
-        plan = tuple(self._initial_plan_factory(context))
-        if not all(isinstance(item, str) and item.strip() for item in plan):
-            raise BenchmarkExecutionError("initial_plan_factory must return non-empty strings")
-        system_prompt = self._system_prompt_factory(context)
-        if not isinstance(system_prompt, str) or not system_prompt.strip():
-            raise BenchmarkExecutionError("system_prompt_factory must return a non-empty string")
+        task, checkpoint_cadence, plan, system_prompt = self._static_inputs(context)
         client = self._client_factory(context)
         provider = self._provider_factory(context)
-        config = self._agent_config_factory(context)
-        if not isinstance(config, AgentConfig):
-            raise BenchmarkExecutionError("agent_config_factory must return AgentConfig")
-        config = replace(config, checkpoint_every_steps=checkpoint_cadence)
+        config = self._effective_agent_config(context, checkpoint_cadence)
         agent = self._agent_factory(client, provider, config, system_prompt)
         run = getattr(agent, "run", None)
         if not callable(run):
@@ -229,6 +219,54 @@ class DurableAgentEpisodeExecutor:
         projection_snapshot = _projection_snapshot(projection)
         event_snapshots = _event_snapshots(events)
         return self._judge(context, run_result, projection_snapshot, event_snapshots)
+
+    def preflight(self, context: Any) -> dict[str, Json]:
+        """Validate frozen agent inputs without constructing runtime/model clients."""
+
+        task, checkpoint_cadence, plan, _system_prompt = self._static_inputs(context)
+        config = self._effective_agent_config(context, checkpoint_cadence)
+        return {
+            "executor": "durable_agent_episode_executor",
+            "task_id": task.task_id,
+            "category": task.category,
+            "checkpoint_cadence": checkpoint_cadence,
+            "initial_plan_steps": len(plan),
+            "agent": {
+                "max_steps": config.max_steps,
+                "token_budget": config.token_budget,
+                "wall_time_budget_ms": config.wall_time_budget_ms,
+                "checkpoint_on_finish": config.checkpoint_on_finish,
+                "checkpoint_every_steps": config.checkpoint_every_steps,
+                "semantic_memory_limit": config.semantic_memory_limit,
+                "learned_intervention_policy_configured": config.learned_intervention_policy is not None,
+            },
+        }
+
+    def _static_inputs(self, context: Any) -> tuple[Any, int, tuple[str, ...], str]:
+        """Build prompt/task inputs shared by execution and static preflight."""
+
+        task = _task_from_context(context)
+        checkpoint_cadence = _checkpoint_cadence_from_manifest(context)
+        plan = tuple(self._initial_plan_factory(context))
+        if not all(isinstance(item, str) and item.strip() for item in plan):
+            raise BenchmarkExecutionError("initial_plan_factory must return non-empty strings")
+        system_prompt = self._system_prompt_factory(context)
+        if not isinstance(system_prompt, str) or not system_prompt.strip():
+            raise BenchmarkExecutionError("system_prompt_factory must return a non-empty string")
+        return task, checkpoint_cadence, plan, system_prompt
+
+    def _effective_agent_config(self, context: Any, checkpoint_cadence: int) -> AgentConfig:
+        """Validate the condition-derived agent controls at one shared boundary."""
+
+        config = self._agent_config_factory(context)
+        if not isinstance(config, AgentConfig):
+            raise BenchmarkExecutionError("agent_config_factory must return AgentConfig")
+        config = replace(config, checkpoint_every_steps=checkpoint_cadence)
+        try:
+            validate_agent_config(config)
+        except ValueError as error:
+            raise BenchmarkExecutionError("invalid agent configuration: {}".format(error)) from error
+        return config
 
 
 @dataclass(frozen=True)
@@ -344,6 +382,20 @@ class DurableTraceJudge:
             "anchors_injected": _non_negative_int(
                 run_result.anchors_injected, "run_result.anchors_injected"
             ),
+        }
+
+    def preflight(self, context: Any) -> dict[str, Json]:
+        """Validate a task's immutable trace expectations before execution."""
+
+        task = _task_from_context(context)
+        expectation = self._expectation(task)
+        return {
+            "required_event_types": list(expectation.required_event_types),
+            "forbidden_event_types": list(expectation.forbidden_event_types),
+            "required_evidence_terms": list(expectation.required_evidence_terms),
+            "required_failure_approaches": list(expectation.required_failure_approaches),
+            "require_checkpoint": expectation.require_checkpoint,
+            "require_recovery": expectation.require_recovery,
         }
 
     def _expectation(self, task: Any) -> DurableTraceExpectation:
