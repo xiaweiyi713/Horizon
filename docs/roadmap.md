@@ -48,6 +48,14 @@
 - Manifest-bound cross-domain scorer for workflow completion and dependency integrity
 - Deterministic Markdown technical-report generator with provenance and interpretation caveats
 
+## v0.7 — implemented resumable experiment execution
+
+- Executor contract binding each observed episode outcome to one frozen manifest/task attempt
+- Matrix execution CLI with dynamic local executor loading and exact task-source identity checks
+- Atomic per-task outcome persistence plus manifest/executor-bound sidecar receipts
+- Safe resume after a failed task, with rejected unreceipted or incompatible result artifacts
+- Synthetic fixture executor for plumbing tests only; it cannot be used as an empirical model claim
+
 ## Research execution
 
-- Run the protocol on externally collected cross-domain model outcomes and publish the resulting technical report
+- Configure task-environment executors for the selected model backbones, collect objective held-out outcomes, and publish the resulting technical report

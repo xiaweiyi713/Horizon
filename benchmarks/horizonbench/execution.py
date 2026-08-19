@@ -11,9 +11,14 @@ import importlib
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, Union
 
-from .adapters import BenchmarkTask
-from .protocol import RunManifest
-from .score import EpisodeResult
+try:  # Supports imports from the direct-script HorizonBench entry points.
+    from .adapters import BenchmarkTask
+    from .protocol import RunManifest
+    from .score import EpisodeResult
+except ImportError:  # pragma: no cover - exercised through direct-script callers.
+    from adapters import BenchmarkTask  # type: ignore[no-redef]
+    from protocol import RunManifest  # type: ignore[no-redef]
+    from score import EpisodeResult  # type: ignore[no-redef]
 
 
 class ExecutionValidationError(ValueError):
@@ -104,7 +109,7 @@ def load_executor(spec: Any) -> EpisodeExecutor:
 
     try:
         module = importlib.import_module(module_name)
-    except ImportError as error:
+    except Exception as error:
         raise ExecutionValidationError(
             "cannot import executor module {!r}: {}".format(module_name, error)
         ) from error

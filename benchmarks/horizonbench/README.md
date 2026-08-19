@@ -60,8 +60,8 @@ frozen held-out set.
 
 Create `models.json` with `model_id`, `provider`, `model`, `model_revision`,
 and a `decoding` object; create `conditions.json` with `condition_id`,
-`policy_revision`, and a `configuration` object. Then plan, run, and score the
-matrix:
+`policy_revision`, and a `configuration` object. Then plan, execute, and score
+the matrix:
 
 ```bash
 python3 benchmarks/horizonbench/plan_matrix.py \
@@ -72,10 +72,61 @@ python3 benchmarks/horizonbench/plan_matrix.py \
   --runtime-revision GIT_REVISION --seeds 1,2,3 \
   --output results/matrix.jsonl
 
-# A provider runner writes results/<run_id>.jsonl, one EpisodeResult per task.
+# The executor receives a frozen manifest/task context and must return an
+# environment-observed EpisodeResult, not an LLM self-assessment.
+python3 benchmarks/horizonbench/execute_matrix.py \
+  --matrix results/matrix.jsonl --tasks data/public-benchmark.jsonl \
+  --source-name PUBLIC_BENCHMARK --source-revision IMMUTABLE_RELEASE \
+  --executor my_experiment.executor:execute --results-dir results
+
 python3 benchmarks/horizonbench/score_matrix.py \
   --matrix results/matrix.jsonl --results-dir results --output results/report.json
 ```
+
+An executor is a local callable with this narrow boundary:
+
+```python
+from benchmarks.horizonbench import EpisodeResult
+
+def execute(context):
+    # Construct the configured model/runtime and run one isolated task
+    # environment. `observation` must come from its verifier, tests, artifacts,
+    # or other objective task boundary—not from the model claiming success.
+    observation = run_task_environment(
+        task=context.task,
+        prompt=context.manifest.prompt.text,
+        model=context.manifest.model,
+        condition=context.manifest.condition,
+        attempt=context.attempt,
+    )
+    return EpisodeResult(
+        task_id=context.task.task_id,
+        category=context.task.category,
+        success=observation.success,
+        goal_retained=observation.goal_retained,
+        constraint_violations=observation.constraint_violations,
+        failure_actions=observation.failure_actions,
+        known_failed_approaches=observation.known_failed_approaches,
+        recovery_attempted=observation.recovery_attempted,
+        recovery_succeeded=observation.recovery_succeeded,
+        recovery_distance=observation.recovery_distance,
+        state_consistent=observation.state_consistent,
+        tokens=observation.tokens,
+        anchors_injected=observation.anchors_injected,
+    )
+```
+
+`execute_matrix.py` writes `<run_id>.jsonl` after every task and a matching
+`<run_id>.receipt.json` sidecar. It resumes only those receipt-bound outputs;
+the receipt binds the result set to the manifest hash, selected task-set hash,
+and executor import path. It rejects changed task sources, mismatched executors,
+duplicate/unexpected outcomes, and result files without a receipt. Pass
+`--overwrite` only to intentionally replace a completed or interrupted run.
+
+For a no-network smoke test of the execution plumbing, use
+`benchmarks.horizonbench.synthetic_fixture_executor:execute`. It returns
+synthetic all-success outcomes and is explicitly **not** an empirical model
+executor.
 
 `score_matrix.py` refuses incomplete rows and refuses a matrix whose task set,
 prompt content, runtime revision, checkpoint cadence, or fault schedule differs
@@ -94,9 +145,9 @@ synthesis, and operations migration recovery. Each workflow names explicit
 prerequisites, at least one recovery boundary, evidence-required steps, and a
 minimum expected boundary count of 12.
 
-Plan the normal matrix against this task source, have the provider runner emit
-the normal `<run_id>.jsonl` outcome files, then produce an auditable domain
-score and a Markdown technical report:
+Plan the normal matrix against this task source, execute it with an
+environment-observing executor, then produce an auditable domain score and a
+Markdown technical report:
 
 ```bash
 python3 benchmarks/horizonbench/plan_matrix.py \
@@ -106,6 +157,12 @@ python3 benchmarks/horizonbench/plan_matrix.py \
   --prompt prompts/system.txt --prompt-revision PROMPT_REVISION \
   --runtime-revision GIT_REVISION --seeds 1,2,3 \
   --output results/cross-domain-matrix.jsonl
+
+python3 benchmarks/horizonbench/execute_matrix.py \
+  --matrix results/cross-domain-matrix.jsonl \
+  --tasks benchmarks/horizonbench/cross_domain_tasks.jsonl \
+  --source-name horizon-cross-domain-fixture --source-revision v1 \
+  --executor my_experiment.executor:execute --results-dir results
 
 python3 benchmarks/horizonbench/cross_domain_score.py \
   --matrix results/cross-domain-matrix.jsonl --results-dir results \

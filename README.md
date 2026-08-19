@@ -225,6 +225,7 @@ python3 benchmarks/horizonbench/score_runs.py results/my-agent.jsonl
 
 # Plan and score a held-out cross-model experiment (provider-neutral).
 python3 benchmarks/horizonbench/plan_matrix.py --help
+python3 benchmarks/horizonbench/execute_matrix.py --help
 python3 benchmarks/horizonbench/score_matrix.py --help
 
 # Score long-horizon workflows and render their audit report.
@@ -287,10 +288,13 @@ experiments/          ablation-report scaffold
 Horizon is a durable runtime and evaluation foundation. Its research-control
 baseline now includes an offline-trained intervention policy, adaptive context
 budgets, deterministic semantic-memory retrieval, and a held-out,
-manifest-bound cross-model evaluation protocol. It also includes a
-cross-domain long-horizon workflow fixture, workflow-level scoring, and a
-provenance-preserving technical-report generator. The remaining work is running
-the protocol on externally collected outcomes. See [roadmap](docs/roadmap.md).
+manifest-bound cross-model evaluation protocol. It also includes a resumable,
+receipt-bound executor entry point: task environments supply objective episode
+outcomes, while the runner atomically persists them without treating model
+self-reports as evidence. The cross-domain suite adds workflow-level scoring
+and a provenance-preserving technical-report generator. The remaining work is
+running the protocol on externally collected outcomes. See
+[roadmap](docs/roadmap.md).
 
 ## License
 

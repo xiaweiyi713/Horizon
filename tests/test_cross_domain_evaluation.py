@@ -203,7 +203,28 @@ class CrossDomainEvaluationTests(unittest.TestCase):
             )
             manifests = read_manifest_jsonl(matrix_path)
             self.assertEqual(len(manifests), 1)
-            write_jsonl(results_dir / (manifests[0].run_id + ".jsonl"), self._results_for(1))
+            executed = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "benchmarks" / "horizonbench" / "execute_matrix.py"),
+                    "--matrix",
+                    str(matrix_path),
+                    "--tasks",
+                    str(ROOT / "benchmarks" / "horizonbench" / "cross_domain_tasks.jsonl"),
+                    "--source-name",
+                    "horizon-cross-domain-fixture",
+                    "--source-revision",
+                    "v1",
+                    "--executor",
+                    "benchmarks.horizonbench.synthetic_fixture_executor:execute",
+                    "--results-dir",
+                    str(results_dir),
+                ],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
             subprocess.run(
                 [
                     sys.executable,
@@ -234,6 +255,7 @@ class CrossDomainEvaluationTests(unittest.TestCase):
                 text=True,
             )
             report = report_path.read_text(encoding="utf-8")
+        self.assertIn("horizonbench_matrix_execution_v1", executed.stdout)
         self.assertIn("wrote", rendered.stdout)
         self.assertIn("Cross-domain workflow outcomes", report)
         self.assertIn("software_engineering", report)
