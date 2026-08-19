@@ -78,6 +78,30 @@ checkpoint cadence, and fault schedule before calculating per-run metrics and
 mean/sample-standard-deviation summaries by model and condition. A rejected
 check is a protocol failure, not a missing metric.
 
+## Cross-domain long-horizon workflow protocol
+
+The bundled `cross_domain_tasks.jsonl` fixture exercises the scoring path across
+software engineering, data analysis, research synthesis, and operations. It is
+not a substitute for externally collected benchmark data. Each task includes a
+workflow ID/title, consecutive step index, expected durable-boundary count,
+earlier-task dependencies, a recovery-boundary flag, and an evidence-required
+flag. The loader rejects an incomplete sequence, a cross-workflow/later
+dependency, inconsistent workflow metadata, or a workflow without recovery.
+
+Use the normal matrix planner with this task source, then run
+`cross_domain_score.py` on the same matrix/results directory. It first verifies
+the source/task identity against every manifest, so changing a fixture or
+source revision after planning cannot be scored as the same experiment. In
+addition to the core metric set, report per-domain and per-workflow task
+completion, whole-workflow completion, prerequisite integrity, recovery
+boundary task success, evidence-task success, and expected-boundary budget.
+
+`render_report.py` turns the JSON score into a deterministic Markdown technical
+report. It includes source and task hashes, prompt/runtime identity, all
+model/condition aggregates, and a per-run workflow ledger. The renderer adds
+an explicit non-causality caveat; do not remove it or present a deterministic
+fixture result as an empirical cross-model conclusion.
+
 ## Learned state-decay predictor protocol
 
 For the learned intervention condition, emit one labeled boundary row with the

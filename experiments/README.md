@@ -28,6 +28,25 @@ mixed task/prompt/runtime control rather than silently averaging incomparable
 runs. See [HorizonBench](../benchmarks/horizonbench/README.md) for the exact
 JSONL and command-line contract.
 
+## Cross-domain workflow study
+
+For the cross-domain fixture or a compatible public source, retain its workflow
+metadata (`workflow_id`, prerequisites, recovery boundary, evidence flag, and
+expected boundaries) in the immutable JSONL task source. After the ordinary
+matrix run, execute:
+
+```bash
+python3 benchmarks/horizonbench/cross_domain_score.py \
+  --matrix results/cross-domain-matrix.jsonl --results-dir results \
+  --output results/cross-domain-score.json
+python3 benchmarks/horizonbench/render_report.py results/cross-domain-score.json \
+  --output results/cross-domain-report.md
+```
+
+Treat the report as an audit artifact, not a paper result by itself. Attach the
+provider's raw outcomes, source license/provenance, manifests, seeds, prompt,
+and durable event traces before making any empirical claim.
+
 ## Learned intervention calibration
 
 Collect durable boundary labels separately from HorizonBench episode scores,

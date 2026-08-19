@@ -41,6 +41,13 @@
   decoding, seed, policy condition, runtime controls, and fault schedule
 - Cross-model matrix planner plus manifest-bound per-run and aggregate scorers
 
-## Research version
+## v0.6 — implemented cross-domain workflow evaluation tooling
 
-- Cross-domain long-horizon workflows and a technical report
+- Four-domain, 12-task held-out long-horizon workflow fixture with explicit
+  prerequisites, recovery boundaries, evidence requirements, and immutable audit identity
+- Manifest-bound cross-domain scorer for workflow completion and dependency integrity
+- Deterministic Markdown technical-report generator with provenance and interpretation caveats
+
+## Research execution
+
+- Run the protocol on externally collected cross-domain model outcomes and publish the resulting technical report

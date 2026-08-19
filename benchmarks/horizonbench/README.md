@@ -84,3 +84,40 @@ between entries. To score a single result against a selected matrix row, use
 The profile and manifest schemas reject unrecognized top-level fields: put
 provider decoding controls in `decoding` and policy-specific controls in
 `configuration` so every effective setting is hashed.
+
+## Cross-domain long-horizon workflow suite
+
+`cross_domain_tasks.jsonl` is a deterministic held-out fixture for the scoring
+path, not an empirical benchmark result. It covers four three-step workflows:
+software engineering event replay, data-analysis OOS audit, research evidence
+synthesis, and operations migration recovery. Each workflow names explicit
+prerequisites, at least one recovery boundary, evidence-required steps, and a
+minimum expected boundary count of 12.
+
+Plan the normal matrix against this task source, have the provider runner emit
+the normal `<run_id>.jsonl` outcome files, then produce an auditable domain
+score and a Markdown technical report:
+
+```bash
+python3 benchmarks/horizonbench/plan_matrix.py \
+  --tasks benchmarks/horizonbench/cross_domain_tasks.jsonl \
+  --source-name horizon-cross-domain-fixture --source-revision v1 \
+  --models configs/models.json --conditions configs/conditions.json \
+  --prompt prompts/system.txt --prompt-revision PROMPT_REVISION \
+  --runtime-revision GIT_REVISION --seeds 1,2,3 \
+  --output results/cross-domain-matrix.jsonl
+
+python3 benchmarks/horizonbench/cross_domain_score.py \
+  --matrix results/cross-domain-matrix.jsonl --results-dir results \
+  --output results/cross-domain-score.json
+
+python3 benchmarks/horizonbench/render_report.py results/cross-domain-score.json \
+  --output results/cross-domain-report.md
+```
+
+The cross-domain scorer rejects a workflow source whose selected task identity
+does not exactly match the matrix. It reports both standard task metrics and
+workflow completion, prerequisite integrity, recovery-boundary task success,
+and evidence-task success. The generated report deliberately labels outcomes
+as supplied observations; retain the raw JSONL, manifests, durable events, and
+external-source license/provenance alongside it.
