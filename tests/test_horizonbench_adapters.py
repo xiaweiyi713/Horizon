@@ -250,6 +250,42 @@ class HorizonBenchAdapterTests(unittest.TestCase):
                         self.adapter.load(path, split="heldout")
                     self.assertIn(name + ".jsonl", str(ctx.exception))
 
+    def test_public_task_types_preserve_their_json_safe_immutable_contract(self) -> None:
+        task = BenchmarkTask(
+            task_id="direct-1",
+            category="goal_retention",
+            goal="Keep the immutable contract",
+            constraint="Do not mutate nested metadata",
+            split="heldout",
+            metadata={"nested": {"labels": ["a", "b"]}},
+        )
+        with self.assertRaises(TypeError):
+            task.metadata["new"] = "value"  # type: ignore[index]
+        with self.assertRaises(TypeError):
+            task.metadata["nested"]["labels"] = ()  # type: ignore[index]
+        with self.assertRaises(ValueError):
+            BenchmarkTask(
+                "bad", "goal", "goal", "constraint", "heldout", {"unsupported": {"set"}}
+            )
+        task_set = BenchmarkTaskSet(
+            source_name="source",
+            source_revision="v1",
+            split="heldout",
+            source_sha256="a" * 64,
+            task_set_sha256="b" * 64,
+            tasks=(task,),
+        )
+        self.assertEqual(task_set.task_ids, ("direct-1",))
+        with self.assertRaisesRegex(ValueError, "split"):
+            BenchmarkTaskSet(
+                source_name="source",
+                source_revision="v1",
+                split="development",
+                source_sha256="a" * 64,
+                task_set_sha256="b" * 64,
+                tasks=(task,),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

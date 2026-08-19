@@ -33,7 +33,14 @@
 - Python compact-context integration and retrieval-off configuration control
 - Retrieval audit protocol and schema-v3 compatibility boundaries
 
+## v0.5 — implemented held-out cross-model evaluation protocol
+
+- Strict dependency-free JSONL adapter for local mirrors of public benchmark splits
+- Source-byte and normalized selected-task fingerprints, with duplicate/split validation
+- Self-validating run manifests that freeze task IDs, prompt, model/provider revision,
+  decoding, seed, policy condition, runtime controls, and fault schedule
+- Cross-model matrix planner plus manifest-bound per-run and aggregate scorers
+
 ## Research version
 
-- Cross-model evaluation and held-out public benchmark adapters
 - Cross-domain long-horizon workflows and a technical report

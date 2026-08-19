@@ -13,11 +13,20 @@ must not be cited as one.
 
 For an actual study:
 
-1. Run each agent/memory condition on the same `HorizonBench` task fixture.
-2. Emit one observed JSONL `EpisodeResult` per task.
-3. Score it with `benchmarks/horizonbench/score_runs.py`.
-4. Record model, provider version, prompt, seed, task fixture hash, and failure
-   injection configuration alongside the outputs.
+1. Use a local JSONL mirror of a public source with a `heldout` split; do not
+   treat the deterministic fixture as a model result.
+2. Generate a frozen model × condition × seed matrix with
+   `benchmarks/horizonbench/plan_matrix.py`.
+3. Emit exactly one observed JSONL `EpisodeResult` per task at
+   `results/<run_id>.jsonl`.
+4. Score the complete run set with `benchmarks/horizonbench/score_matrix.py`.
+
+The matrix records the source/task hashes, task IDs, model/provider and
+decoding revision, complete prompt hash/text, seed, policy/runtime revision,
+checkpoint cadence, and fault schedule. The scorer rejects a missing task or a
+mixed task/prompt/runtime control rather than silently averaging incomparable
+runs. See [HorizonBench](../benchmarks/horizonbench/README.md) for the exact
+JSONL and command-line contract.
 
 ## Learned intervention calibration
 

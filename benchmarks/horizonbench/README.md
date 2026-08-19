@@ -40,3 +40,47 @@ State-Anchor behavior with or without a relevant durable retrieval result; it
 does not claim empirical embedding or model quality. Real experiments should
 retain `memory_created` and `semantic_memory_retrieved` events, score a frozen
 relevant-memory set, and compare it to `semantic_memory_limit=0`.
+
+## Held-out and cross-model runs
+
+For an empirical run, do not reuse the synthetic `tasks.json` fixture as a
+public benchmark result. Mirror the benchmark source locally as UTF-8 JSONL and
+give every row these required fields:
+
+```json
+{"id":"public-001","category":"goal_retention","goal":"...","constraint":"...","split":"development"}
+{"id":"heldout-001","category":"fault_recovery","goal":"...","constraint":"...","split":"heldout","metadata":{"license":"..."}}
+```
+
+Extra JSON-safe fields are retained as metadata. `JsonlTaskAdapter` rejects
+blank/malformed rows, duplicate IDs even across splits, and requests for an
+empty split. It records both the raw source SHA-256 and a normalized selected
+task-set SHA-256, so ordinary whitespace or record ordering cannot change a
+frozen held-out set.
+
+Create `models.json` with `model_id`, `provider`, `model`, `model_revision`,
+and a `decoding` object; create `conditions.json` with `condition_id`,
+`policy_revision`, and a `configuration` object. Then plan, run, and score the
+matrix:
+
+```bash
+python3 benchmarks/horizonbench/plan_matrix.py \
+  --tasks data/public-benchmark.jsonl \
+  --source-name PUBLIC_BENCHMARK --source-revision IMMUTABLE_RELEASE \
+  --models configs/models.json --conditions configs/conditions.json \
+  --prompt prompts/system.txt --prompt-revision PROMPT_REVISION \
+  --runtime-revision GIT_REVISION --seeds 1,2,3 \
+  --output results/matrix.jsonl
+
+# A provider runner writes results/<run_id>.jsonl, one EpisodeResult per task.
+python3 benchmarks/horizonbench/score_matrix.py \
+  --matrix results/matrix.jsonl --results-dir results --output results/report.json
+```
+
+`score_matrix.py` refuses incomplete rows and refuses a matrix whose task set,
+prompt content, runtime revision, checkpoint cadence, or fault schedule differs
+between entries. To score a single result against a selected matrix row, use
+`score_runs.py RESULT.jsonl --manifest-matrix results/matrix.jsonl --run-id RUN_ID`.
+The profile and manifest schemas reject unrecognized top-level fields: put
+provider decoding controls in `decoding` and policy-specific controls in
+`configuration` so every effective setting is hashed.

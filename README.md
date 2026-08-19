@@ -222,6 +222,10 @@ python3 experiments/run_ablation.py
 
 # Score observed adapter/LLM episode JSONL.
 python3 benchmarks/horizonbench/score_runs.py results/my-agent.jsonl
+
+# Plan and score a held-out cross-model experiment (provider-neutral).
+python3 benchmarks/horizonbench/plan_matrix.py --help
+python3 benchmarks/horizonbench/score_matrix.py --help
 ```
 
 The scorer reports task success, goal retention, constraint violations,
@@ -278,8 +282,9 @@ experiments/          ablation-report scaffold
 
 Horizon is a durable runtime and evaluation foundation. Its research-control
 baseline now includes an offline-trained intervention policy, adaptive context
-budgets, and deterministic semantic-memory retrieval; planned extensions are
-external benchmark adapters and cross-model/cross-domain experiments. See
+budgets, deterministic semantic-memory retrieval, and a held-out,
+manifest-bound cross-model evaluation protocol. The remaining research
+extension is cross-domain long-horizon workflows and a technical report. See
 [roadmap](docs/roadmap.md).
 
 ## License

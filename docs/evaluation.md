@@ -52,6 +52,32 @@ Every model-backed run should save:
 The built-in synthetic smoke suite validates this data path but is not an
 empirical LLM result.
 
+## Held-out cross-model protocol
+
+Use `benchmarks/horizonbench/adapters.py` to load a local UTF-8 JSONL mirror of
+a public benchmark. A task record must have nonempty `id`, `category`, `goal`,
+`constraint`, and `split` fields. Keep development and held-out rows in the
+same immutable source when possible: the adapter rejects duplicate identifiers
+across the whole source, fingerprints the raw bytes, and fingerprints the
+normalized selected split independently of whitespace and input ordering.
+
+Before invoking a model, use `plan_matrix.py` to produce a manifest row for
+every model × condition × seed. Each row includes the selected task IDs and
+hashes, complete prompt text/hash and revision, provider/model revision,
+decoding controls, seed (or explicit `null` when unsupported), policy revision,
+checkpoint cadence, fault schedule, runtime revision, and optional JSON-safe
+metadata such as a frozen memory-catalog hash. The manifest itself has a
+content SHA-256, so a changed setting cannot silently reuse an old run ID.
+
+Provider adapters remain outside Horizon; they must emit exactly one observed
+`EpisodeResult` per frozen task into `results/<run_id>.jsonl`. Score a single
+row with `score_runs.py --manifest-matrix MATRIX --run-id RUN_ID`, or score the
+entire matrix with `score_matrix.py`. The aggregate scorer verifies that every
+row shares the same held-out task set, prompt content, runtime revision,
+checkpoint cadence, and fault schedule before calculating per-run metrics and
+mean/sample-standard-deviation summaries by model and condition. A rejected
+check is a protocol failure, not a missing metric.
+
 ## Learned state-decay predictor protocol
 
 For the learned intervention condition, emit one labeled boundary row with the

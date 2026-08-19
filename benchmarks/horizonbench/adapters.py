@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -18,6 +19,7 @@ from typing import Any, Mapping, Sequence, Union
 
 _NORMALIZED_FIELDS = frozenset({"id", "category", "goal", "constraint", "split"})
 _REQUIRED_FIELDS = ("id", "category", "goal", "constraint", "split")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 PathLike = Union[str, Path]
 
 
@@ -33,6 +35,14 @@ class BenchmarkTask:
     metadata: Mapping[str, Any]
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "task_id", _require_nonempty_string(self.task_id, "task_id"))
+        object.__setattr__(self, "category", _require_nonempty_string(self.category, "category"))
+        object.__setattr__(self, "goal", _require_nonempty_string(self.goal, "goal"))
+        object.__setattr__(self, "constraint", _require_nonempty_string(self.constraint, "constraint"))
+        object.__setattr__(self, "split", _require_nonempty_string(self.split, "split"))
+        if not isinstance(self.metadata, Mapping):
+            raise ValueError("metadata must be an object")
+        _ensure_json_safe(self.metadata, "task metadata")
         object.__setattr__(self, "metadata", _freeze_json(self.metadata))
 
     def as_dict(self) -> dict[str, Any]:
@@ -58,7 +68,22 @@ class BenchmarkTaskSet:
     tasks: tuple[BenchmarkTask, ...]
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "tasks", tuple(self.tasks))
+        object.__setattr__(self, "source_name", _require_nonempty_string(self.source_name, "source_name"))
+        object.__setattr__(self, "source_revision", _require_nonempty_string(self.source_revision, "source_revision"))
+        object.__setattr__(self, "split", _require_nonempty_string(self.split, "split"))
+        object.__setattr__(self, "source_sha256", _require_sha256(self.source_sha256, "source_sha256"))
+        object.__setattr__(self, "task_set_sha256", _require_sha256(self.task_set_sha256, "task_set_sha256"))
+        tasks = tuple(self.tasks)
+        if not tasks:
+            raise ValueError("tasks must not be empty")
+        if not all(isinstance(task, BenchmarkTask) for task in tasks):
+            raise ValueError("tasks must contain BenchmarkTask values")
+        identifiers = [task.task_id for task in tasks]
+        if len(set(identifiers)) != len(identifiers):
+            raise ValueError("tasks must have unique task ids")
+        if any(task.split != self.split for task in tasks):
+            raise ValueError("every task split must match task-set split")
+        object.__setattr__(self, "tasks", tasks)
 
     @property
     def task_ids(self) -> tuple[str, ...]:
@@ -206,6 +231,13 @@ def _canonical_json(value: Any) -> str:
 def _require_nonempty_string(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError("{} must be a nonempty string".format(field))
+    return value
+
+
+def _require_sha256(value: Any, field: str) -> str:
+    value = _require_nonempty_string(value, field)
+    if not _SHA256_RE.fullmatch(value):
+        raise ValueError("{} must be a lowercase SHA-256 hex digest".format(field))
     return value
 
 
