@@ -51,6 +51,10 @@ class AgentConfig:
     token_budget: Optional[int] = None
     wall_time_budget_ms: Optional[int] = None
     checkpoint_on_finish: bool = True
+    # When set, persist a manual checkpoint after every N model decision
+    # boundaries.  HorizonBench binds this from the manifest's checkpoint
+    # cadence so the value is not merely recorded without taking effect.
+    checkpoint_every_steps: Optional[int] = None
     # Query only when the run actually has durable semantic-memory records.
     # Zero disables retrieval, which is useful for ablation and preserves a
     # compact-context control without a second agent implementation.
@@ -86,9 +90,10 @@ class DurableAgent:
         provider: LlmProvider,
         *,
         config: Optional[AgentConfig] = None,
+        system_prompt: Optional[str] = None,
     ) -> None:
         self.client = client
-        self.policy = JsonActionPolicy(provider)
+        self.policy = JsonActionPolicy(provider, system_prompt=system_prompt)
         self.config = config or AgentConfig()
         if not isinstance(self.config.semantic_memory_limit, int) or isinstance(
             self.config.semantic_memory_limit, bool
@@ -96,6 +101,13 @@ class DurableAgent:
             raise ValueError("semantic_memory_limit must be an integer")
         if not 0 <= self.config.semantic_memory_limit <= 8:
             raise ValueError("semantic_memory_limit must be between 0 and 8")
+        if self.config.checkpoint_every_steps is not None:
+            if isinstance(self.config.checkpoint_every_steps, bool) or not isinstance(
+                self.config.checkpoint_every_steps, int
+            ):
+                raise ValueError("checkpoint_every_steps must be an integer or None")
+            if self.config.checkpoint_every_steps < 1:
+                raise ValueError("checkpoint_every_steps must be positive when supplied")
 
     def start(
         self,
@@ -199,7 +211,8 @@ class DurableAgent:
             tracker.note_response(response.input_tokens, response.output_tokens)
             self._persist_budget(run_id, tracker, started_at)
             try:
-                self._apply_action(run_id, action, tracker)
+                checkpointed = self._apply_action(run_id, action, tracker)
+                self._checkpoint_if_due(run_id, step, checkpointed=checkpointed)
             except Exception as error:  # Surface provider policy mistakes without hiding the durable run.
                 return RunResult(
                     run_id,
@@ -219,26 +232,26 @@ class DurableAgent:
             "agent reached max_steps",
         )
 
-    def _apply_action(self, run_id: str, action: AgentAction, tracker: InterventionTracker) -> None:
+    def _apply_action(self, run_id: str, action: AgentAction, tracker: InterventionTracker) -> bool:
+        """Apply one action and report whether it persisted a manual checkpoint."""
         if action.action_type == "checkpoint":
             self.client.checkpoint(run_id)
-            return
+            return True
         if action.action_type == "recover":
             self.client.recover(run_id)
             tracker.recovered_session = True
-            return
+            return False
         if action.action_type == "intervene":
             self.client.intervene_if_needed(run_id, **tracker.consume_boundary())
-            return
+            return False
         if action.action_type == "execute_ready_tasks":
             outcomes = self.client.execute_ready_tasks(run_id)
             for outcome in outcomes:
                 if outcome.get("output", {}).get("Err") or outcome.get("output", {}).get("err"):
                     tracker.note_failure()
-            return
+            return False
         if action.action_type == "finish":
-            self._finish(run_id)
-            return
+            return self._finish(run_id)
         if action.action_type not in _RUNTIME_COMMANDS:
             raise ValueError("unknown policy action `{}`".format(action.action_type))
         data = dict(action.data)
@@ -248,6 +261,7 @@ class DurableAgent:
             self._normalize_subgoal(data)
             tracker.note_subgoal_switch()
         self.client.command(run_id, action.action_type, data)
+        return False
 
     def _context_for_boundary(
         self,
@@ -392,7 +406,7 @@ class DurableAgent:
             lines.append("- [{}; score {}/1000] {}".format(kind, score, content))
         return updated_projection, "\n".join(lines) if len(lines) > 1 else ""
 
-    def _finish(self, run_id: str) -> None:
+    def _finish(self, run_id: str) -> bool:
         state = str(self.client.get_run(run_id)["state"])
         if state == "executing":
             self.client.transition(run_id, "evaluating")
@@ -402,6 +416,19 @@ class DurableAgent:
         elif state != "completed":
             raise ValueError("finish is only legal from executing/evaluating, got {}".format(state))
         if self.config.checkpoint_on_finish:
+            self.client.checkpoint(run_id)
+            return True
+        return False
+
+    def _checkpoint_if_due(self, run_id: str, step: int, *, checkpointed: bool) -> None:
+        """Honor a configured decision-boundary checkpoint cadence.
+
+        A policy can intentionally checkpoint more often.  Avoid creating two
+        manual checkpoints at one boundary when its explicit action or finish
+        path already made one.
+        """
+        cadence = self.config.checkpoint_every_steps
+        if cadence is not None and step % cadence == 0 and not checkpointed:
             self.client.checkpoint(run_id)
 
     def _persist_budget(self, run_id: str, tracker: InterventionTracker, started_at: float) -> None:
@@ -452,20 +479,75 @@ class DurableAgent:
 
     @staticmethod
     def _compact_context(projection: Mapping[str, Any]) -> str:
+        """Render the bounded facts needed at every ordinary decision boundary.
+
+        A State Anchor remains the high-detail intervention mechanism, but a
+        new run must not hide its original constraints or approved plan until a
+        risk trigger happens.  Keep those baseline facts short and bounded so
+        ordinary turns remain materially smaller than a full anchor.
+        """
         cognitive = projection.get("cognitive", {})
+        if not isinstance(cognitive, Mapping):
+            cognitive = {}
         goal = cognitive.get("primary_goal") or "<unset>"
         open_subgoals = cognitive.get("open_subgoals") or []
-        current_subgoal = open_subgoals[0].get("content") if open_subgoals else "<none>"
-        return (
+        current_subgoal = "<none>"
+        if open_subgoals and isinstance(open_subgoals[0], Mapping):
+            current_subgoal = str(open_subgoals[0].get("content") or "<none>")
+        lines = [
             "Current durable boundary (this is not a full memory injection):\n"
             "- Run state: {}\n"
             "- Primary goal: {}\n"
             "- Current subgoal: {}\n"
-            "- Tasks: {}\n"
-            "Choose one next action.".format(
+            "- Tasks: {}".format(
                 projection.get("state"),
                 goal,
                 current_subgoal,
                 len(projection.get("tasks") or {}),
             )
-        )
+        ]
+        constraints = DurableAgent._compact_records(cognitive.get("constraints"), "content", limit=4)
+        if constraints:
+            lines.append("- Binding constraints: {}".format(" | ".join(constraints)))
+        plan = DurableAgent._compact_strings(cognitive.get("current_plan"), limit=3)
+        if plan:
+            lines.append("- Approved plan: {}".format(" | ".join(plan)))
+        failures = DurableAgent._compact_records(cognitive.get("failed_attempts"), "approach", limit=3)
+        if failures:
+            lines.append("- Known failed approaches: {}".format(" | ".join(failures)))
+        lines.append("Choose one next action.")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _compact_records(value: Any, field: str, *, limit: int) -> list[str]:
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+            return []
+        records: list[str] = []
+        for item in value:
+            if not isinstance(item, Mapping):
+                continue
+            content = item.get(field)
+            if not isinstance(content, str) or not content.strip():
+                continue
+            records.append(DurableAgent._truncate_compact_value(content))
+            if len(records) >= limit:
+                break
+        return records
+
+    @staticmethod
+    def _compact_strings(value: Any, *, limit: int) -> list[str]:
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+            return []
+        records: list[str] = []
+        for item in value:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            records.append(DurableAgent._truncate_compact_value(item))
+            if len(records) >= limit:
+                break
+        return records
+
+    @staticmethod
+    def _truncate_compact_value(value: str, *, limit: int = 240) -> str:
+        normalized = " ".join(value.split())
+        return normalized if len(normalized) <= limit else normalized[: limit - 1] + "…"

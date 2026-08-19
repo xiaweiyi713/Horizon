@@ -128,6 +128,76 @@ For a no-network smoke test of the execution plumbing, use
 synthetic all-success outcomes and is explicitly **not** an empirical model
 executor.
 
+## Model-backed durable-trace execution
+
+For a narrow runtime-mechanism task set, Horizon includes the opt-in executor
+`benchmarks.horizonbench.openai_compatible_trace_executor:execute`. It runs a
+real `DurableAgent`, binds the manifest prompt text and checkpoint cadence to
+that agent, collects its durable projection/events, and lets `DurableTraceJudge`
+produce the result. A model saying `finish` is never enough to score success.
+Importing or planning this executor does not contact a model endpoint.
+The prompt artifact must be a complete Horizon single-action system prompt: it
+is supplied verbatim, not silently prefixed with a second mutable prompt.
+
+Each selected task must include a metadata object such as:
+
+```json
+{
+  "initial_plan": ["restore checkpoint", "verify the operation ID"],
+  "horizon_trace_expectation": {
+    "required_event_types": ["evidence_recorded", "checkpoint_created"],
+    "required_evidence_terms": ["verified checksum"],
+    "required_failure_approaches": ["restart from event zero"],
+    "require_checkpoint": true,
+    "require_recovery": false
+  }
+}
+```
+
+Use an `openai-compatible` (or `openai_compatible`) model profile and put all
+effective provider controls in `decoding`:
+
+```json
+{
+  "model_id": "model-a",
+  "provider": "openai-compatible",
+  "model": "MODEL_NAME",
+  "model_revision": "PROVIDER_SNAPSHOT",
+  "decoding": {"temperature": 0, "top_p": 1, "max_tokens": 512}
+}
+```
+
+The matrix's separate `seed` is forwarded to the provider; do not specify a
+different `decoding.seed`. Put simple agent controls under a condition's
+`configuration.agent`, for example
+`{"agent":{"max_steps":24,"semantic_memory_limit":4}}`.
+
+Start a separate benchmark runtime with automatic checkpoints disabled, so
+unconfigured runtime snapshots do not add checkpoint events; the bridge then
+applies the cadence frozen in the manifest:
+
+```bash
+cargo run -p horizon-cli -- --db results/durable-trace.db --checkpoint-every 0 serve
+
+export HORIZON_BENCH_RUNTIME_URL=http://127.0.0.1:8787
+export HORIZON_BENCH_API_BASE_URL=https://YOUR_COMPATIBLE_ENDPOINT/v1
+export HORIZON_BENCH_API_KEY=YOUR_KEY  # or use OPENAI_API_KEY
+
+PYTHONPATH=python:. python3 benchmarks/horizonbench/execute_matrix.py \
+  --matrix results/matrix.jsonl --tasks data/durable-trace-tasks.jsonl \
+  --source-name DURABLE_TRACE_TASKS --source-revision IMMUTABLE_RELEASE \
+  --executor benchmarks.horizonbench.openai_compatible_trace_executor:execute \
+  --results-dir results
+```
+
+The bridge deliberately rejects a non-empty `fault_schedule`. A task-specific
+environment executor must enact, observe, and judge an actual fault/restart
+schedule. Likewise, the bundled cross-domain fixture does not declare trace
+expectations and must use an artifact/test/environment judge; do not run it
+through this trace-only executor or report its supplied observations as a
+model result. Use an isolated benchmark environment for any agent allowed to
+create or execute external tasks.
+
 `score_matrix.py` refuses incomplete rows and refuses a matrix whose task set,
 prompt content, runtime revision, checkpoint cadence, or fault schedule differs
 between entries. To score a single result against a selected matrix row, use

@@ -15,6 +15,14 @@ Horizon ships `ScriptedProvider` for deterministic demos/tests and
 `OpenAICompatibleProvider` for `/chat/completions` endpoints using only the
 standard library.
 
+`OpenAICompatibleProvider` accepts an optional `decoding` mapping. It forwards
+only `temperature`, `top_p`, `max_tokens`, `max_completion_tokens`, `seed`,
+`stop`, `presence_penalty`, and `frequency_penalty`; invalid, non-finite, or
+reserved request fields fail before any network request. If `decoding` includes
+`temperature`, it overrides the constructor's compatibility default. This makes
+the settings frozen by a HorizonBench model manifest effective at the provider
+boundary rather than merely descriptive metadata.
+
 ## Action protocol
 
 The policy returns exactly one JSON action per boundary:
@@ -45,6 +53,38 @@ normalized `tool_result_recorded` event. A result contains a terminal status
 duration, and metadata. Horizon intentionally records token/count metadata
 rather than the full prompt or response, keeping the audit trail useful without
 making it a second transcript store.
+
+## Manifest-bound HorizonBench episodes
+
+`DurableAgentEpisodeExecutor` is the model-backed bridge for a frozen
+HorizonBench matrix row. It creates one isolated durable run for the task,
+passes the matrix's immutable prompt text as the policy system prompt, applies
+the manifest checkpoint cadence after model decision boundaries, and gives the
+completed runtime projection plus immutable event trace to an objective judge.
+An LLM's own `finish` action is never a benchmark success signal by itself.
+
+`DurableTraceJudge` is the built-in judge for narrow runtime-mechanism tasks.
+Those task records must declare their observable requirements in metadata:
+
+```json
+{
+  "initial_plan": ["restore the checkpoint", "verify the operation ID"],
+  "horizon_trace_expectation": {
+    "required_event_types": ["evidence_recorded", "checkpoint_created"],
+    "required_evidence_terms": ["verified checksum"],
+    "require_checkpoint": true
+  }
+}
+```
+
+It checks durable facts only (goal/constraint retention, event types,
+checkpoints, recovery, evidence and remembered failures), and leaves recovery
+distance unset rather than inventing a progress oracle. It is not an
+artifact-, test-, or environment-based judge for a public domain benchmark;
+provide a task-specific `ObjectiveEpisodeJudge`/executor for those tasks.
+The generic bridge intentionally rejects a non-empty manifest fault schedule,
+because only a task environment can safely enact and observe an arbitrary
+crash/restart protocol.
 
 ## External tools
 

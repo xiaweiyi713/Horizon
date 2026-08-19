@@ -56,6 +56,14 @@
 - Safe resume after a failed task, with rejected unreceipted or incompatible result artifacts
 - Synthetic fixture executor for plumbing tests only; it cannot be used as an empirical model claim
 
+## v0.8 — implemented model-backed durable-trace execution
+
+- `DurableAgent` bridge from a frozen matrix task to a separately objective judge
+- Frozen manifest prompt and checkpoint cadence made effective in the agent loop
+- Strict durable-trace expectation judge for runtime-mechanism tasks, with no model self-report scoring
+- OpenAI-compatible opt-in executor that forwards validated decoding controls and matrix seed
+- Explicit rejection of fault schedules that the generic bridge cannot actually enact
+
 ## Research execution
 
-- Configure task-environment executors for the selected model backbones, collect objective held-out outcomes, and publish the resulting technical report
+- Configure task-environment executors for selected model backbones, collect objective held-out outcomes, and publish the resulting technical report. Public artifact/domain tasks and fault schedules still require their own environment-specific judge.

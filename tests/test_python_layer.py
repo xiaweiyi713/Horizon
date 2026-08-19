@@ -38,6 +38,34 @@ class PythonLayerTests(unittest.TestCase):
         self.assertEqual(response.input_tokens, 0)
         self.assertEqual(len(provider.history), 1)
 
+    def test_action_policy_uses_a_frozen_supplied_system_prompt(self) -> None:
+        provider = ScriptedProvider([{"action": {"type": "finish", "data": {}}}])
+        JsonActionPolicy(provider, system_prompt="Frozen benchmark prompt v1.").next_action("boundary")
+        self.assertEqual(provider.history[0][0].content, "Frozen benchmark prompt v1.")
+        with self.assertRaisesRegex(ValueError, "system_prompt"):
+            JsonActionPolicy(ScriptedProvider([]), system_prompt="  ")
+
+    def test_checkpoint_cadence_is_validated_and_skips_duplicate_boundary_checkpoint(self) -> None:
+        class CheckpointClient:
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+
+            def checkpoint(self, run_id: str) -> None:
+                self.calls.append(run_id)
+
+        with self.assertRaisesRegex(ValueError, "checkpoint_every_steps"):
+            DurableAgent(CheckpointClient(), ScriptedProvider([]), config=AgentConfig(checkpoint_every_steps=0))
+        client = CheckpointClient()
+        agent = DurableAgent(
+            client,
+            ScriptedProvider([]),
+            config=AgentConfig(checkpoint_every_steps=2),
+        )
+        agent._checkpoint_if_due("run-cadence", 1, checkpointed=False)
+        agent._checkpoint_if_due("run-cadence", 2, checkpointed=False)
+        agent._checkpoint_if_due("run-cadence", 4, checkpointed=True)
+        self.assertEqual(client.calls, ["run-cadence"])
+
     def test_tracker_consumes_short_lived_risk_signals(self) -> None:
         tracker = InterventionTracker(context_budget_tokens=100, recovered_session=True)
         tracker.note_response(40, 20)

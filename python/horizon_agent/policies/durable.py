@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from ..providers.base import ChatMessage, LlmProvider, ProviderResponse
 
@@ -68,13 +68,19 @@ Never repeat an approach listed under Failed Approaches unless the recorded
 failure is retryable and you explicitly choose retry_task. Choose finish only
 when the goal and all required constraints are satisfied."""
 
-    def __init__(self, provider: LlmProvider) -> None:
+    def __init__(self, provider: LlmProvider, *, system_prompt: Optional[str] = None) -> None:
+        if system_prompt is not None and (not isinstance(system_prompt, str) or not system_prompt.strip()):
+            raise ValueError("system_prompt must be a non-empty string when supplied")
         self.provider = provider
+        # Keep the established protocol prompt as the default for ordinary
+        # callers. Benchmark execution can supply the immutable prompt carried
+        # by its manifest instead of merely hashing an unused artifact.
+        self.system_prompt = system_prompt or self.SYSTEM_PROMPT
 
     def next_action(self, context: str) -> tuple[AgentAction, ProviderResponse]:
         response = self.provider.complete(
             [
-                ChatMessage(role="system", content=self.SYSTEM_PROMPT),
+                ChatMessage(role="system", content=self.system_prompt),
                 ChatMessage(role="user", content=context),
             ],
             json_mode=True,

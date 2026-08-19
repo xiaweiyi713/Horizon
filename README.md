@@ -69,7 +69,8 @@ Its three core mechanisms are:
   deterministic retrieval; policies receive ranked hits rather than the full
   catalog.
 - HorizonBench 30-task fixture, baseline/ablation smoke harness, metric scorer,
-  and real cross-process fault-injection test.
+  real cross-process fault-injection test, and a manifest-bound real-model
+  durable-trace executor with objective runtime judging.
 
 ## Quick start
 
@@ -288,12 +289,13 @@ experiments/          ablation-report scaffold
 Horizon is a durable runtime and evaluation foundation. Its research-control
 baseline now includes an offline-trained intervention policy, adaptive context
 budgets, deterministic semantic-memory retrieval, and a held-out,
-manifest-bound cross-model evaluation protocol. It also includes a resumable,
-receipt-bound executor entry point: task environments supply objective episode
-outcomes, while the runner atomically persists them without treating model
-self-reports as evidence. The cross-domain suite adds workflow-level scoring
-and a provenance-preserving technical-report generator. The remaining work is
-running the protocol on externally collected outcomes. See
+manifest-bound cross-model evaluation protocol. Its resumable executor entry
+point atomically persists objective episode outcomes without treating model
+self-reports as evidence. The real-model durable-trace bridge makes the frozen
+prompt, decoding settings, seed, and checkpoint cadence effective for narrow
+runtime tasks; artifact/domain tasks and fault schedules still require a
+task-specific environment judge. The cross-domain suite adds workflow-level
+scoring and a provenance-preserving technical-report generator. See
 [roadmap](docs/roadmap.md).
 
 ## License

@@ -129,7 +129,7 @@ class OpenAICompatibleProvider:
         base_url: str = "https://api.openai.com/v1",
         timeout: float = 60.0,
         temperature: float = 0.0,
-        decoding: Mapping[str, Any] = None,
+        decoding: Optional[Mapping[str, Any]] = None,
     ) -> None:
         self.model = model
         self.api_key = api_key if api_key is not None else os.getenv("OPENAI_API_KEY")

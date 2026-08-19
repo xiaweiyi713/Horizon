@@ -78,6 +78,15 @@ checkpoint cadence, and fault schedule before calculating per-run metrics and
 mean/sample-standard-deviation summaries by model and condition. A rejected
 check is a protocol failure, not a missing metric.
 
+For durable-runtime mechanism tasks, `DurableAgentEpisodeExecutor` provides a
+model-backed bridge that actually supplies the frozen prompt to the policy and
+applies the frozen checkpoint cadence. The OpenAI-compatible trace plugin also
+forwards validated manifest decoding controls and the matrix seed. Its
+`DurableTraceJudge` verifies immutable event/projection facts, not an LLM
+self-assessment. It rejects non-empty fault schedules: a public task must use
+an environment executor that performs the declared fault and judges the
+resulting artifact/test outcome objectively.
+
 ## Cross-domain long-horizon workflow protocol
 
 The bundled `cross_domain_tasks.jsonl` fixture exercises the scoring path across

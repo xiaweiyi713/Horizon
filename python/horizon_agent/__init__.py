@@ -7,6 +7,16 @@ state-machine or persistence logic in Python.
 
 from .agent import AgentConfig, DurableAgent, RunResult
 from .adapters import AdapterError, AdapterRegistry, AdapterRequest, AdapterResult, FunctionAdapter
+from .benchmark import (
+    BenchmarkExecutionError,
+    DurableAgentEpisodeExecutor,
+    DurableTraceExpectation,
+    DurableTraceJudge,
+    ObjectiveEpisodeJudge,
+    agent_config_from_condition,
+    initial_plan_from_task,
+    system_prompt_from_manifest,
+)
 from .client import HorizonApiError, HorizonClient
 from .memory import AdaptiveContextBudgetController, LearnedInterventionPolicy, LogisticDecayPredictor
 from .native import NativeHorizonRuntime, NativeRuntimeUnavailable
@@ -18,7 +28,11 @@ __all__ = [
     "AdapterRequest",
     "AdapterResult",
     "AdaptiveContextBudgetController",
+    "BenchmarkExecutionError",
     "DurableAgent",
+    "DurableAgentEpisodeExecutor",
+    "DurableTraceExpectation",
+    "DurableTraceJudge",
     "FunctionAdapter",
     "HorizonApiError",
     "HorizonClient",
@@ -26,5 +40,9 @@ __all__ = [
     "LogisticDecayPredictor",
     "NativeHorizonRuntime",
     "NativeRuntimeUnavailable",
+    "ObjectiveEpisodeJudge",
     "RunResult",
+    "agent_config_from_condition",
+    "initial_plan_from_task",
+    "system_prompt_from_manifest",
 ]
