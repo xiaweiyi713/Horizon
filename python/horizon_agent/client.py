@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any, Mapping, Optional, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -207,6 +208,42 @@ class HorizonClient:
             },
         )
 
+    def create_memory(
+        self,
+        run_id: str,
+        content: str,
+        *,
+        kind: str = "episodic",
+        source_event_id: str,
+        importance: float = 0.5,
+        confidence: float = 1.0,
+        memory_id: Optional[str] = None,
+        created_at: Optional[str] = None,
+    ) -> Mapping[str, Json]:
+        """Persist a source-attributed record into the retrieval catalog.
+
+        ``source_event_id`` is intentionally required: the caller must retain
+        the durable or external origin it is summarizing instead of creating an
+        untraceable semantic-memory record. Rust validates content and quality
+        bounds before accepting the immutable event.
+        """
+        timestamp = created_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return self.command(
+            run_id,
+            "create_memory",
+            {
+                "memory": {
+                    "id": memory_id or str(uuid4()),
+                    "kind": kind,
+                    "content": content,
+                    "source_event": source_event_id,
+                    "importance": importance,
+                    "confidence": confidence,
+                    "created_at": timestamp,
+                }
+            },
+        )
+
     def record_tool_invocation(
         self, run_id: str, operation_id: str, tool: str, input: Json
     ) -> Mapping[str, Json]:
@@ -298,6 +335,21 @@ class HorizonClient:
         Anchor from the authoritative durable projection.
         """
         return self.command(run_id, "apply_intervention", {"assessment": dict(assessment)})
+
+    def retrieve_semantic_memory(
+        self, run_id: str, query: str, *, limit: int = 4
+    ) -> Mapping[str, Json]:
+        """Rank and durably record relevant semantic-memory context.
+
+        The response is a normal command outcome. Its
+        ``semantic_memory_retrieved`` event contains the exact records and
+        integer scores that the Rust runtime selected.
+        """
+        return self.command(
+            run_id,
+            "retrieve_semantic_memory",
+            {"query": query, "limit": limit},
+        )
 
     def checkpoint(self, run_id: str) -> Mapping[str, Json]:
         return self._request("POST", f"/v1/runs/{run_id}/checkpoint", {})

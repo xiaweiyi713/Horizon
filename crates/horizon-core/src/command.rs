@@ -72,6 +72,12 @@ pub enum RuntimeCommand {
     CreateMemory {
         memory: MemoryItem,
     },
+    /// Retrieve a compact, ranked semantic-memory subset from the durable
+    /// projection. The runtime persists the exact selected hits for audit.
+    RetrieveSemanticMemory {
+        query: String,
+        limit: usize,
+    },
     RecordToolInvocation {
         operation_id: String,
         tool: String,

@@ -64,6 +64,19 @@ jobs:
           assert [event["type"] for event in outcome["events"]] == [
               "state_decay_assessed", "state_anchor_injected"
           ]
+          memory = runtime.create_memory(
+              run_id,
+              "Recover PostgreSQL from checkpoint before retrying the migration.",
+              kind="episodic",
+              source_event_id="5ba9b609-ed29-4e65-af43-bd9d1bcdb539",
+              importance=0.9,
+              confidence=0.95,
+          )
+          assert memory["events"][0]["type"] == "memory_created"
+          retrieval = runtime.retrieve_semantic_memory(
+              run_id, "recover postgres checkpoint", limit=4
+          )
+          assert retrieval["events"][0]["type"] == "semantic_memory_retrieved"
           PY
       - name: Python tests
         run: PYTHONPATH=python:. python3 -m unittest discover -s tests -p 'test_*.py' -v

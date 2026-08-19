@@ -260,7 +260,8 @@ fn jaccard_milli<T: Ord>(left: &BTreeSet<T>, right: &BTreeSet<T>) -> u32 {
     }
     let intersection = left.intersection(right).count() as u64;
     let union = left.len() as u64 + right.len() as u64 - intersection;
-    if union == 0 { 0 } else { ((intersection * 1_000 + union / 2) / union) as u32 }
+    let numerator = intersection * 1_000 + union / 2;
+    numerator.checked_div(union).unwrap_or_default() as u32
 }
 
 fn score_memory(query: &TextFeatures, memory: &MemoryItem) -> Option<RetrievedMemory> {
@@ -362,7 +363,7 @@ mod tests {
         let relevant =
             sample_memory(ID_LOW, "sqlite checkpoint compaction preserves the event log", 0.4, 0.4);
         let irrelevant = sample_memory(ID_HIGH, "banana pancake recipe with maple syrup", 0.4, 0.4);
-        let hits = SemanticMemoryRetrievalPolicy::default().retrieve(
+        let hits = SemanticMemoryRetrievalPolicy.retrieve(
             "sqlite checkpoint compaction",
             &[irrelevant.clone(), relevant.clone()],
             8,
@@ -375,9 +376,9 @@ mod tests {
     #[test]
     fn normalizes_case_and_punctuation() {
         let memory = sample_memory(ID_LOW, "Postgres, Recovery!  Ready.", 0.5, 0.5);
-        let hits = SemanticMemoryRetrievalPolicy::default().retrieve(
+        let hits = SemanticMemoryRetrievalPolicy.retrieve(
             "POSTGRES recovery ready???",
-            &[memory.clone()],
+            std::slice::from_ref(&memory),
             4,
         );
         assert_eq!(hits.len(), 1);
@@ -389,7 +390,7 @@ mod tests {
     fn quality_does_not_rescue_irrelevant_text() {
         let relevant = sample_memory(ID_LOW, "postgres connection pool timeout", 0.05, 0.05);
         let shiny = sample_memory(ID_HIGH, "xylophone umbrellas juggle quartz", 1.0, 1.0);
-        let hits = SemanticMemoryRetrievalPolicy::default().retrieve(
+        let hits = SemanticMemoryRetrievalPolicy.retrieve(
             "postgres connection pool",
             &[shiny.clone(), relevant.clone()],
             8,
@@ -403,7 +404,7 @@ mod tests {
     fn breaks_score_ties_by_ascending_memory_id() {
         let later = sample_memory(ID_HIGH, "durable event sourced runtime", 0.5, 0.5);
         let earlier = sample_memory(ID_LOW, "durable event sourced runtime", 0.5, 0.5);
-        let policy = SemanticMemoryRetrievalPolicy::default();
+        let policy = SemanticMemoryRetrievalPolicy;
         let hits =
             policy.retrieve("durable event sourced runtime", &[later.clone(), earlier.clone()], 8);
         assert_eq!(hits.len(), 2);
@@ -422,7 +423,7 @@ mod tests {
         let blank = sample_memory(ID_HIGH, "   ", 1.0, 1.0);
         let empty = sample_memory(ID_THIRD, "", 1.0, 1.0);
         let memories = [filled.clone(), blank, empty];
-        let policy = SemanticMemoryRetrievalPolicy::default();
+        let policy = SemanticMemoryRetrievalPolicy;
         assert!(policy.retrieve("   ", &memories, 8).is_empty());
         assert!(policy.retrieve("\t\n", &memories, 8).is_empty());
         assert!(policy.retrieve("postgres checkpoint", &memories, 0).is_empty());

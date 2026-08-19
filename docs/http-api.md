@@ -65,6 +65,46 @@ command for a structured terminal result:
 }
 ```
 
+## Semantic-memory commands
+
+Create a source-attributed memory record before it can be retrieved. Quality
+values are finite normalized values; Rust rejects blank content, invalid quality
+values, duplicate IDs, and oversized records.
+
+```json
+{
+  "type": "create_memory",
+  "data": {
+    "memory": {
+      "id": "5c4dddc8-971b-48a6-a147-49e07c51e4d5",
+      "kind": "episodic",
+      "content": "Recover PostgreSQL from a verified checkpoint before retrying the migration.",
+      "source_event": "5ba9b609-ed29-4e65-af43-bd9d1bcdb539",
+      "importance": 0.9,
+      "confidence": 0.95,
+      "created_at": "2026-08-19T00:00:00Z"
+    }
+  }
+}
+```
+
+Retrieve a bounded subset through the normal command endpoint:
+
+```json
+{
+  "type": "retrieve_semantic_memory",
+  "data": {
+    "query": "recover postgres checkpoint",
+    "limit": 4
+  }
+}
+```
+
+The accepted command emits one `semantic_memory_retrieved` event. Its payload
+contains Rust-selected hits and `score_milli` values, not caller-supplied
+results. Limits are 1–8 and query length is bounded. Empty hit lists are still
+persisted, making retrieval-specific ablations and audit possible.
+
 ## Learned intervention command
 
 An offline-trained Python policy submits each decision through

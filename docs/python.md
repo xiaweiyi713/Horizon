@@ -94,6 +94,41 @@ PY
 `HorizonClient`, including `DurableAgent` compatibility. It does not bypass the
 Rust state machine or event store; it merely removes the localhost HTTP hop.
 
+## Semantic-memory retrieval
+
+Store source-attributed records with `HorizonClient.create_memory`, then let a
+`DurableAgent` add only a bounded ranked subset to its regular compact context:
+
+```python
+from uuid import uuid4
+
+from horizon_agent import AgentConfig, DurableAgent, HorizonClient
+
+client = HorizonClient()
+client.create_memory(
+    run_id,
+    "Recover PostgreSQL from a verified checkpoint before retrying the migration.",
+    kind="episodic",
+    source_event_id=str(uuid4()),  # durable/external provenance reference
+    importance=0.9,
+    confidence=0.95,
+)
+agent = DurableAgent(client, provider, config=AgentConfig(semantic_memory_limit=4))
+```
+
+The current local `hybrid_lexical_v1` ranker combines normalized token overlap
+and character-trigram similarity. It is deterministic, requires no vector
+database or network service, and treats importance/confidence only as secondary
+weighting; irrelevant high-quality records cannot be selected. Every lookup is
+persisted as `semantic_memory_retrieved` with the query and exact hits. Set
+`semantic_memory_limit=0` for the retrieval-off ablation. The command allows at
+most eight hits, and agents do not query at all when a run has no memory catalog.
+
+`source_event_id` is deliberately required by the helper: retain the durable or
+external origin of a summary rather than creating anonymous memory. Retrieval
+is not a replacement for the State Anchor; if an anchor follows a lookup, the
+agent preserves the bounded retrieval context alongside it.
+
 ## Learned state-decay policy
 
 The research layer includes a dependency-free logistic predictor over the

@@ -65,6 +65,9 @@ Its three core mechanisms are:
   after durable event commit.
 - Offline-trainable state-decay predictor and adaptive context-budget controller
   whose every decision is durably auditable.
+- Source-attributed semantic-memory catalog with bounded, durable and
+  deterministic retrieval; policies receive ranked hits rather than the full
+  catalog.
 - HorizonBench 30-task fixture, baseline/ablation smoke harness, metric scorer,
   and real cross-process fault-injection test.
 
@@ -246,7 +249,7 @@ timeout.
 crates/
   horizon-core/       state machine, command/event model, projection
   horizon-store/      SQLite/WAL event store and snapshots
-  horizon-memory/     state-decay risk and State Anchor policy
+  horizon-memory/     state-decay risk, State Anchor, and semantic retrieval policies
   horizon-scheduler/  Tokio DAG scheduling primitives
   horizon-process/    timeout-aware process supervision
   horizon-trace/      structured tracing bridge for durable events
@@ -274,9 +277,9 @@ experiments/          ablation-report scaffold
 ## Status and roadmap
 
 Horizon is a durable runtime and evaluation foundation. Its research-control
-baseline now includes an offline-trained intervention policy and adaptive
-context budgets; planned extensions are semantic-memory retrieval, external
-benchmark adapters, and cross-model/cross-domain experiments. See
+baseline now includes an offline-trained intervention policy, adaptive context
+budgets, and deterministic semantic-memory retrieval; planned extensions are
+external benchmark adapters and cross-model/cross-domain experiments. See
 [roadmap](docs/roadmap.md).
 
 ## License

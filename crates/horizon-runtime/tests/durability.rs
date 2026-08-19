@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
+use chrono::Utc;
 use horizon_core::{
-    AgentState, InterventionAction, InterventionAssessment, RuntimeCommand, StateDecaySignals,
-    TaskSpec, TaskStatus,
+    AgentState, EventId, InterventionAction, InterventionAssessment, MemoryId, MemoryItem,
+    MemoryKind, RuntimeCommand, StateDecaySignals, TaskSpec, TaskStatus,
 };
 use horizon_runtime::{HorizonRuntime, RuntimeConfig};
 use horizon_store::{EventStore, SqliteEventStore};
@@ -167,5 +168,55 @@ async fn learned_intervention_assessments_survive_checkpoint_and_event_suffix_re
     assert_eq!(
         events.iter().filter(|event| event.event.name() == "state_decay_assessed").count(),
         2
+    );
+}
+
+#[tokio::test]
+async fn semantic_memory_catalog_and_retrieval_survive_checkpoint_suffix_replay() {
+    let directory = tempdir().unwrap();
+    let database = directory.path().join("semantic-memory.db");
+    let config = RuntimeConfig { checkpoint_every_events: 0, ..Default::default() };
+    let store_before_restart = Arc::new(SqliteEventStore::open(&database).await.unwrap());
+    let runtime_before_restart =
+        HorizonRuntime::with_config(Arc::clone(&store_before_restart), config.clone());
+    let run_id = runtime_before_restart
+        .create_run("replay semantic-memory retrieval")
+        .await
+        .unwrap()
+        .projection
+        .run_id;
+    let memory = MemoryItem {
+        id: MemoryId::new(),
+        kind: MemoryKind::Episodic,
+        content: "Restore PostgreSQL from checkpoint before retrying the migration.".into(),
+        source_event: EventId::new(),
+        importance: 0.9,
+        confidence: 0.95,
+        created_at: Utc::now(),
+    };
+    runtime_before_restart
+        .dispatch(run_id, RuntimeCommand::CreateMemory { memory: memory.clone() })
+        .await
+        .unwrap();
+    runtime_before_restart.checkpoint(run_id).await.unwrap();
+    runtime_before_restart
+        .retrieve_semantic_memory(run_id, "restore postgres checkpoint", 4)
+        .await
+        .unwrap();
+    drop(runtime_before_restart);
+    drop(store_before_restart);
+
+    let store_after_restart = Arc::new(SqliteEventStore::open(&database).await.unwrap());
+    let runtime_after_restart = HorizonRuntime::with_config(store_after_restart, config);
+    let projection = runtime_after_restart.projection(run_id).await.unwrap();
+    assert_eq!(projection.semantic_memories.get(&memory.id), Some(&memory));
+    assert_eq!(projection.semantic_memory_retrievals, 1);
+    let retrieval = projection.last_semantic_memory_retrieval.as_ref().unwrap();
+    assert_eq!(retrieval.algorithm, "hybrid_lexical_v1");
+    assert_eq!(retrieval.hits[0].memory_id, memory.id);
+    let events = runtime_after_restart.events(run_id).await.unwrap();
+    assert_eq!(
+        events.iter().filter(|event| event.event.name() == "semantic_memory_retrieved").count(),
+        1
     );
 }

@@ -546,7 +546,8 @@ mod tests {
     use std::env;
 
     use horizon_core::{
-        EventKind, InterventionAction, InterventionAssessment, NewEvent, RunId, StateDecaySignals,
+        EventKind, InterventionAction, InterventionAssessment, NewEvent, RunId,
+        SemanticMemoryRetrieval, StateDecaySignals,
     };
 
     use super::*;
@@ -583,15 +584,26 @@ mod tests {
                             },
                         },
                     ),
+                    NewEvent::new(
+                        run_id,
+                        EventKind::SemanticMemoryRetrieved {
+                            retrieval: SemanticMemoryRetrieval {
+                                query: "recover postgres checkpoint".into(),
+                                algorithm: "hybrid_lexical_v1".into(),
+                                hits: Vec::new(),
+                            },
+                        },
+                    ),
                 ],
                 0,
             )
             .await
             .unwrap();
-        assert_eq!(appended.iter().map(|event| event.sequence).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(appended.iter().map(|event| event.sequence).collect::<Vec<_>>(), [1, 2, 3]);
         let events = store.load_events(run_id, 0).await.unwrap();
-        assert_eq!(events.len(), 2);
+        assert_eq!(events.len(), 3);
         assert!(matches!(events[1].event, EventKind::StateDecayAssessed { .. }));
+        assert!(matches!(events[2].event, EventKind::SemanticMemoryRetrieved { .. }));
         assert!(store.schema_version().await.unwrap() >= 2);
     }
 }

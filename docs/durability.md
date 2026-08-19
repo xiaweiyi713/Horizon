@@ -63,11 +63,14 @@ upcast boundary. This permits future releases to understand older immutable
 events without rewriting historical records. PostgreSQL uses the same schema and
 event contract as SQLite, including expected-sequence conflict detection.
 
-The current event vocabulary is schema v2: v1 histories are still decoded
-through an explicit identity upcast, while v2 adds durable
-`state_decay_assessed` records for learned-policy research. Snapshot projection
-fields for those assessments use Serde defaults, so v0.2 snapshots remain
-readable and replay their v1 event suffix correctly.
+The current event vocabulary is schema v3: v1 and v2 histories are decoded
+through explicit identity upcasts, while v3 adds durable
+`semantic_memory_retrieved` records. A retrieval event carries the query,
+algorithm, and copied ranked hits, so a replay can inspect the same policy
+context even when an index implementation changes later. Snapshot projection
+fields for both learned interventions and semantic-memory catalogs use Serde
+defaults, so v0.2/v0.3 snapshots remain readable and replay their event suffix
+correctly.
 
 ## Operational notes
 

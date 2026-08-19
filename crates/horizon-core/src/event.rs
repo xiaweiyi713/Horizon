@@ -10,9 +10,10 @@ use crate::{AgentState, EventId, MemoryId, RunId, TaskId, TaskSpec};
 /// database migration. That lets future releases upcast older immutable event
 /// payloads without rewriting an audit log in place.
 ///
-/// Version 2 adds durable state-decay assessment records. The event-schema
-/// decoder keeps version-1 histories readable rather than rewriting them.
-pub const CURRENT_EVENT_SCHEMA_VERSION: u32 = 2;
+/// Version 3 adds durable semantic-memory retrieval records. The event-schema
+/// decoder keeps version-1 and version-2 histories readable rather than
+/// rewriting them.
+pub const CURRENT_EVENT_SCHEMA_VERSION: u32 = 3;
 
 const fn default_event_schema_version() -> u32 {
     CURRENT_EVENT_SCHEMA_VERSION
@@ -42,6 +43,36 @@ pub struct MemoryItem {
     pub importance: f32,
     pub confidence: f32,
     pub created_at: DateTime<Utc>,
+}
+
+/// One selected memory together with the deterministic score that selected it.
+///
+/// Content and kind are copied into the immutable retrieval event so a later
+/// reader can audit exactly what was injected, even if a future version adds a
+/// separate memory lifecycle or index implementation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SemanticMemoryHit {
+    pub memory_id: MemoryId,
+    pub kind: MemoryKind,
+    pub content: String,
+    /// Integer score in `[0, 1000]`, avoiding float-formatting drift in audit
+    /// and cross-language clients.
+    pub score_milli: u32,
+}
+
+/// A replayable semantic-memory query boundary.
+///
+/// The runtime owns the selected hits; policy code supplies only a query and
+/// result limit. Recording both empty and non-empty lookups makes retrieval
+/// behavior reproducible and supports retrieval-specific ablations.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SemanticMemoryRetrieval {
+    pub query: String,
+    /// Stable retrieval implementation identifier, for example
+    /// `hybrid_lexical_v1`.
+    pub algorithm: String,
+    #[serde(default)]
+    pub hits: Vec<SemanticMemoryHit>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -294,6 +325,7 @@ pub enum EventKind {
     ToolResultRecorded { result: ToolResult },
     ProcessCompleted { operation_id: String, exit_code: Option<i32> },
     MemoryCreated { memory: MemoryItem },
+    SemanticMemoryRetrieved { retrieval: SemanticMemoryRetrieval },
     FailureRemembered { failure: FailureRecord },
     DecisionMade { decision: DecisionRecord },
     EvidenceRecorded { evidence: EvidenceRecord },
@@ -332,6 +364,7 @@ impl EventKind {
             Self::ToolResultRecorded { .. } => "tool_result_recorded",
             Self::ProcessCompleted { .. } => "process_completed",
             Self::MemoryCreated { .. } => "memory_created",
+            Self::SemanticMemoryRetrieved { .. } => "semantic_memory_retrieved",
             Self::FailureRemembered { .. } => "failure_remembered",
             Self::DecisionMade { .. } => "decision_made",
             Self::EvidenceRecorded { .. } => "evidence_recorded",

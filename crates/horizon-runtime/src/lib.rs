@@ -18,10 +18,13 @@ use chrono::Utc;
 use horizon_core::{
     AgentState, CURRENT_EVENT_SCHEMA_VERSION, CommandError, EventId, EventKind, EventRecord,
     FailureRecord, InterventionAssessment, NewEvent, ProjectionError, RunId, RunProjection,
-    RuntimeCommand, TaskId, TaskRecord, TaskSpecValidationError, TaskStatus, ToolResult,
-    ToolResultStatus,
+    RuntimeCommand, SemanticMemoryHit, SemanticMemoryRetrieval, TaskId, TaskRecord,
+    TaskSpecValidationError, TaskStatus, ToolResult, ToolResultStatus,
 };
-use horizon_memory::{DecaySignals, StateAnchorPolicy, matching_failure};
+use horizon_memory::{
+    DecaySignals, SEMANTIC_RETRIEVAL_ALGORITHM, SemanticMemoryRetrievalPolicy, StateAnchorPolicy,
+    matching_failure,
+};
 use horizon_process::{ProcessOutput, ProcessRequest, ProcessSupervisor};
 use horizon_scheduler::{AsyncTaskScheduler, TaskDag, TaskExecutionResult, TaskExecutor};
 use horizon_store::{
@@ -34,6 +37,12 @@ use tokio::sync::Mutex;
 use tracing::{debug, info};
 
 pub use http::{HttpServerError, serve};
+
+/// Bound the size of one audit event and one LLM retrieval injection. Callers
+/// may request fewer hits, but never make a single boundary unbounded.
+const MAX_SEMANTIC_MEMORY_RETRIEVAL_HITS: usize = 8;
+const MAX_SEMANTIC_MEMORY_QUERY_CHARS: usize = 4_096;
+const MAX_SEMANTIC_MEMORY_CONTENT_CHARS: usize = 8_192;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RuntimeConfig {
@@ -352,6 +361,19 @@ impl<S: EventStore + ?Sized> HorizonRuntime<S> {
         self.dispatch(run_id, RuntimeCommand::ApplyIntervention { assessment }).await
     }
 
+    /// Select and durably record a compact semantic-memory subset. The caller
+    /// supplies only its query and limit; Rust ranks the projection's immutable
+    /// memory catalog and records the exact result for replay/audit.
+    pub async fn retrieve_semantic_memory(
+        &self,
+        run_id: RunId,
+        query: impl Into<String>,
+        limit: usize,
+    ) -> Result<CommandOutcome, RuntimeError> {
+        self.dispatch(run_id, RuntimeCommand::RetrieveSemanticMemory { query: query.into(), limit })
+            .await
+    }
+
     /// Returns a remembered non-retryable failure, allowing an external agent
     /// policy to block a known-bad strategy before it creates a side effect.
     pub async fn known_failure(
@@ -532,7 +554,68 @@ impl<S: EventStore + ?Sized> HorizonRuntime<S> {
                 Ok(vec![EventKind::EvidenceRecorded { evidence }])
             }
             RuntimeCommand::CreateMemory { memory } => {
+                if memory.content.trim().is_empty() {
+                    return Err(RuntimeError::InvalidCommand("memory content cannot be empty"));
+                }
+                if memory.content.chars().count() > MAX_SEMANTIC_MEMORY_CONTENT_CHARS {
+                    return Err(RuntimeError::InvalidCommand(
+                        "memory content exceeds the maximum length",
+                    ));
+                }
+                if !memory.importance.is_finite()
+                    || !(0.0..=1.0).contains(&memory.importance)
+                    || !memory.confidence.is_finite()
+                    || !(0.0..=1.0).contains(&memory.confidence)
+                {
+                    return Err(RuntimeError::InvalidCommand(
+                        "memory importance and confidence must be finite values between 0 and 1",
+                    ));
+                }
+                if projection.semantic_memories.contains_key(&memory.id) {
+                    return Err(RuntimeError::InvalidCommand(
+                        "memory id already exists in this run",
+                    ));
+                }
                 Ok(vec![EventKind::MemoryCreated { memory }])
+            }
+            RuntimeCommand::RetrieveSemanticMemory { query, limit } => {
+                if query.trim().is_empty() {
+                    return Err(RuntimeError::InvalidCommand(
+                        "semantic memory query cannot be empty",
+                    ));
+                }
+                if query.chars().count() > MAX_SEMANTIC_MEMORY_QUERY_CHARS {
+                    return Err(RuntimeError::InvalidCommand(
+                        "semantic memory query exceeds the maximum length",
+                    ));
+                }
+                if limit == 0 || limit > MAX_SEMANTIC_MEMORY_RETRIEVAL_HITS {
+                    return Err(RuntimeError::InvalidCommand(
+                        "semantic memory retrieval limit must be between 1 and 8",
+                    ));
+                }
+                let memories = projection.semantic_memories.values().cloned().collect::<Vec<_>>();
+                let ranked = SemanticMemoryRetrievalPolicy.retrieve(&query, &memories, limit);
+                let hits = ranked
+                    .into_iter()
+                    .filter_map(|ranked_memory| {
+                        projection.semantic_memories.get(&ranked_memory.memory_id).map(|memory| {
+                            SemanticMemoryHit {
+                                memory_id: memory.id,
+                                kind: memory.kind,
+                                content: memory.content.clone(),
+                                score_milli: ranked_memory.score_milli,
+                            }
+                        })
+                    })
+                    .collect();
+                Ok(vec![EventKind::SemanticMemoryRetrieved {
+                    retrieval: SemanticMemoryRetrieval {
+                        query,
+                        algorithm: SEMANTIC_RETRIEVAL_ALGORITHM.to_owned(),
+                        hits,
+                    },
+                }])
             }
             RuntimeCommand::RecordToolInvocation { operation_id, tool, input } => {
                 if operation_id.trim().is_empty() || tool.trim().is_empty() {
@@ -1111,9 +1194,11 @@ pub enum RuntimeError {
 mod tests {
     use std::sync::Arc;
 
+    use chrono::Utc;
     use horizon_core::{
-        AgentState, Constraint, InterventionAction, InterventionAssessment, RuntimeCommand,
-        StateDecaySignals, TaskSpec, TaskStatus, ToolResult, ToolResultStatus,
+        AgentState, Constraint, EventId, InterventionAction, InterventionAssessment, MemoryId,
+        MemoryItem, MemoryKind, RuntimeCommand, StateDecaySignals, TaskSpec, TaskStatus,
+        ToolResult, ToolResultStatus,
     };
     use horizon_store::SqliteEventStore;
 
@@ -1357,6 +1442,83 @@ mod tests {
         assert!(projection.is_operation_completed("adapter-42"));
         assert_eq!(projection.tool_results.len(), 1);
         assert_eq!(projection.tool_results[0].duration_ms, Some(12));
+    }
+
+    #[tokio::test]
+    async fn semantic_memory_retrieval_is_durable_and_never_uses_caller_supplied_hits() {
+        let runtime = runtime().await;
+        let run_id = runtime
+            .create_run("restore a durable PostgreSQL migration")
+            .await
+            .unwrap()
+            .projection
+            .run_id;
+        let relevant = MemoryItem {
+            id: MemoryId::new(),
+            kind: MemoryKind::Episodic,
+            content: "Recover PostgreSQL from its checkpoint before retrying the migration.".into(),
+            source_event: EventId::new(),
+            importance: 0.9,
+            confidence: 0.95,
+            created_at: Utc::now(),
+        };
+        let irrelevant = MemoryItem {
+            id: MemoryId::new(),
+            kind: MemoryKind::Environment,
+            content: "Water the botanical garden on Tuesday morning.".into(),
+            source_event: EventId::new(),
+            importance: 1.0,
+            confidence: 1.0,
+            created_at: Utc::now(),
+        };
+        runtime
+            .dispatch(run_id, RuntimeCommand::CreateMemory { memory: relevant.clone() })
+            .await
+            .unwrap();
+        runtime
+            .dispatch(run_id, RuntimeCommand::CreateMemory { memory: irrelevant })
+            .await
+            .unwrap();
+
+        let outcome = runtime
+            .retrieve_semantic_memory(run_id, "recover postgres checkpoint", 4)
+            .await
+            .unwrap();
+        assert_eq!(outcome.events.len(), 1);
+        let EventKind::SemanticMemoryRetrieved { retrieval } = &outcome.events[0].event else {
+            panic!("retrieve command must persist a semantic_memory_retrieved event");
+        };
+        assert_eq!(retrieval.query, "recover postgres checkpoint");
+        assert_eq!(retrieval.algorithm, "hybrid_lexical_v1");
+        assert_eq!(retrieval.hits[0].memory_id, relevant.id);
+        assert!(retrieval.hits.iter().all(|hit| hit.score_milli <= 1_000));
+        assert!(
+            retrieval
+                .hits
+                .iter()
+                .all(|hit| hit.content != "Water the botanical garden on Tuesday morning.")
+        );
+
+        let projection = runtime.projection(run_id).await.unwrap();
+        assert_eq!(projection.semantic_memories.len(), 2);
+        assert_eq!(projection.semantic_memory_retrievals, 1);
+        assert_eq!(
+            projection.last_semantic_memory_retrieval.as_ref().unwrap().hits[0].memory_id,
+            relevant.id
+        );
+    }
+
+    #[tokio::test]
+    async fn semantic_memory_retrieval_rejects_invalid_query_and_limit() {
+        let runtime = runtime().await;
+        let run_id =
+            runtime.create_run("validate semantic retrieval").await.unwrap().projection.run_id;
+        let empty_query = runtime.retrieve_semantic_memory(run_id, "   ", 1).await.unwrap_err();
+        assert!(matches!(empty_query, RuntimeError::InvalidCommand(_)));
+        let zero_limit = runtime.retrieve_semantic_memory(run_id, "anything", 0).await.unwrap_err();
+        assert!(matches!(zero_limit, RuntimeError::InvalidCommand(_)));
+        let over_limit = runtime.retrieve_semantic_memory(run_id, "anything", 9).await.unwrap_err();
+        assert!(matches!(over_limit, RuntimeError::InvalidCommand(_)));
     }
 
     #[tokio::test]

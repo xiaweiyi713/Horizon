@@ -172,6 +172,59 @@ class HorizonStrategy(Strategy):
         return EpisodeResult(**{**result.__dict__, "anchors_injected": int(high_risk)})
 
 
+class SemanticMemoryStrategy(Strategy):
+    """Synthetic retrieval-on/off control for the durable v0.4 boundary.
+
+    Like the rest of this harness, it is deliberately a deterministic fixture,
+    not an LLM result. The pair keeps the same State Anchor behavior while
+    varying whether a relevant durable memory subset is made behavioral before
+    a decision boundary.
+    """
+
+    def __init__(self, *, retrieval_enabled: bool = True) -> None:
+        self.retrieval_enabled = retrieval_enabled
+        self.name = (
+            "Horizon_semantic_memory"
+            if retrieval_enabled
+            else "Horizon_semantic_memory_off"
+        )
+
+    def run(self, scenario: Scenario) -> EpisodeResult:
+        anchor_result = HorizonStrategy().run(scenario)
+        retrieval_needed = scenario.category in {
+            "failure_avoidance",
+            "cross_session_recovery",
+            "fault_recovery",
+        }
+        retrieval_tokens = 90 if retrieval_needed and self.retrieval_enabled else 0
+        if not retrieval_needed or self.retrieval_enabled:
+            return EpisodeResult(
+                **{
+                    **anchor_result.__dict__,
+                    "tokens": anchor_result.tokens + retrieval_tokens,
+                }
+            )
+
+        # The retrieval-off control retains durable state but does not surface a
+        # relevant episodic record at this synthetic boundary. It therefore
+        # exposes the same category-sensitive failure mode as passive memory.
+        result = _result(
+            scenario,
+            goal_retained=True,
+            constraint_retained=scenario.category != "fault_recovery",
+            failure_visible=scenario.category != "failure_avoidance",
+            recovery_ok=scenario.category != "cross_session_recovery",
+            state_consistent=False,
+            tokens=anchor_result.tokens,
+        )
+        return EpisodeResult(
+            **{
+                **result.__dict__,
+                "anchors_injected": anchor_result.anchors_injected,
+            }
+        )
+
+
 class LearnedAdaptiveStrategy(Strategy):
     """Synthetic control that exercises the real learned/budget policy code.
 
@@ -406,6 +459,8 @@ def default_strategies(include_ablations: bool = True) -> list[Strategy]:
         StructuredPassiveStrategy(),
         AlwaysOnAnchorStrategy(),
         HorizonStrategy(),
+        SemanticMemoryStrategy(),
+        SemanticMemoryStrategy(retrieval_enabled=False),
         LearnedAdaptiveStrategy(),
         LearnedAdaptiveStrategy(adaptive_budget=False),
     ]

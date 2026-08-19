@@ -36,3 +36,13 @@ The validation file must be run/model-disjoint from training. The command emits
 accuracy, precision, recall, and Brier score; report those with HorizonBench
 outcomes, not in place of them. The `examples/state-decay-labels.jsonl` file is
 only a schema smoke fixture.
+
+## Semantic-memory retrieval
+
+For the retrieval-on/off condition, freeze the `memory_created` catalog before
+running an episode and retain every resulting `semantic_memory_retrieved` event.
+Predeclare the relevant memory IDs for each query, then report precision@k,
+recall@k, mean selected-memory tokens, empty-query rate, and HorizonBench
+outcomes for the same model, seed, prompts, and catalog. The built-in
+`hybrid_lexical_v1` ranker is a deterministic local baseline; do not represent
+its synthetic smoke result as an embedding or LLM retrieval result.

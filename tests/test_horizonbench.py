@@ -70,6 +70,13 @@ class HorizonBenchTests(unittest.TestCase):
         # that the benchmark invokes distinct controller behavior, not aliases.
         self.assertNotEqual(adaptive["anchors_injected"], fixed["anchors_injected"])
 
+    def test_semantic_memory_on_off_control_is_not_an_alias(self) -> None:
+        report = run_suite(load_scenarios(), default_strategies(include_ablations=False))
+        retrieved = report["strategies"]["Horizon_semantic_memory"]
+        retrieval_off = report["strategies"]["Horizon_semantic_memory_off"]
+        self.assertGreater(retrieved["task_success_rate"], retrieval_off["task_success_rate"])
+        self.assertGreater(retrieved["tokens_per_successful_task"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

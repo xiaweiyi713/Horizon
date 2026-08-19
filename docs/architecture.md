@@ -126,6 +126,24 @@ persists `StateDecayAssessed`, and renders the State Anchor from the current
 projection only when the requested action is valid. This records both action and
 inaction without granting a model mutable access to cognitive state.
 
+## Semantic-memory retrieval boundary
+
+`memory_created` events build a separately indexed catalog of source-attributed
+`MemoryItem` records. A policy does not receive that catalog wholesale. It
+submits a compact query and a bounded limit through `RetrieveSemanticMemory`;
+Rust runs the deterministic local `hybrid_lexical_v1` ranker against the
+replayed projection, then persists `SemanticMemoryRetrieved` with the exact
+query, algorithm, copied hit content, kinds, and integer scores. This makes a
+retrieval result durable evidence of what was presented at that boundary, not
+an opaque cache or mutable vector-store response.
+
+The v0.4 ranker is dependency-free and deliberately local: normalized token
+overlap plus character-trigram similarity, with importance/confidence only as
+secondary quality weighting. It is a reproducible semantic-memory baseline, not
+a claim that Horizon ships a neural embedding service. Python appends only the
+returned bounded hits to the next policy context and reloads the returned
+projection before any subsequent intervention decision.
+
 ## Python bindings
 
 HTTP remains the default integration contract. The optional `horizon_native`
@@ -147,5 +165,3 @@ does not claim distributed exactly-once behavior.
 - Complete container sandboxing and orchestration
 - Browser and GUI automation
 - Multi-agent orchestration
-- Vector database / semantic-memory retrieval
-- Learned intervention policy

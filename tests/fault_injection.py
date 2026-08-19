@@ -19,6 +19,7 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Optional
+from uuid import uuid4
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -181,6 +182,37 @@ def assert_output_cap(client: HorizonClient) -> None:
     assert result["output"]["stdout_truncated"], result
 
 
+def assert_semantic_memory_retrieval(client: HorizonClient) -> None:
+    """Exercise HTTP ingestion -> Rust ranker -> durable retrieval audit."""
+    run_id = make_executing_run(client, "Recover a durable PostgreSQL migration")
+    client.create_memory(
+        run_id,
+        "Recover PostgreSQL from the verified checkpoint before retrying the migration.",
+        kind="episodic",
+        source_event_id=str(uuid4()),
+        importance=0.9,
+        confidence=0.95,
+    )
+    client.create_memory(
+        run_id,
+        "Water the botanical garden on Tuesday morning.",
+        kind="environment",
+        source_event_id=str(uuid4()),
+        importance=1.0,
+        confidence=1.0,
+    )
+    outcome = client.retrieve_semantic_memory(run_id, "recover postgres checkpoint", limit=4)
+    assert len(outcome["events"]) == 1, outcome
+    event = outcome["events"][0]
+    assert event["type"] == "semantic_memory_retrieved", event
+    retrieval = event["data"]["retrieval"]
+    assert retrieval["algorithm"] == "hybrid_lexical_v1", retrieval
+    assert retrieval["hits"][0]["content"].startswith("Recover PostgreSQL"), retrieval
+    projection = client.get_run(run_id)
+    assert projection["semantic_memory_retrievals"] == 1, projection
+    assert len(projection["semantic_memories"]) == 2, projection
+
+
 def assert_python_policy_loop(client: HorizonClient) -> None:
     provider = ScriptedProvider(
         [
@@ -276,13 +308,14 @@ def main() -> None:
             restarted_client = HorizonClient("http://" + address)
             assert_process_timeout(restarted_client)
             assert_output_cap(restarted_client)
+            assert_semantic_memory_retrieval(restarted_client)
             assert_python_policy_loop(restarted_client)
             assert_learned_intervention_policy(restarted_client)
         finally:
             stop_server(server)
     print(
         "fault injection passed: crash/recovery + timeout + output cap + "
-        "Python policy loop + learned intervention boundary"
+        "Python policy loop + semantic retrieval + learned intervention boundary"
     )
 
 

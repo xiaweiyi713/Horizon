@@ -26,11 +26,13 @@ pub fn decode_event_payload(schema_version: u32, payload: &str) -> Result<EventK
 
 fn upcast_payload(schema_version: u32, value: Value) -> Result<Value, StoreError> {
     match schema_version {
-        // v1 had the original event vocabulary. Version 2 adds a new event
-        // variant for state-decay assessments but does not alter any existing
-        // payload, so its structural upcast is intentionally identity.
-        1 => upcast_v1_to_v2(value),
-        2 => Ok(value),
+        // v1 had the original event vocabulary. Version 2 adds state-decay
+        // assessments and version 3 adds semantic-memory retrievals. Neither
+        // changes an existing payload shape, but the explicit chain keeps
+        // future schema evolution honest.
+        1 => upcast_v2_to_v3(upcast_v1_to_v2(value)?),
+        2 => upcast_v2_to_v3(value),
+        3 => Ok(value),
         _ => Err(StoreError::UnsupportedEventSchema {
             found: schema_version,
             supported: CURRENT_EVENT_SCHEMA_VERSION,
@@ -41,6 +43,12 @@ fn upcast_payload(schema_version: u32, value: Value) -> Result<Value, StoreError
 fn upcast_v1_to_v2(value: Value) -> Result<Value, StoreError> {
     // Keep this explicit identity boundary: future schema changes chain from
     // here, while immutable v1 events remain byte-for-byte unmodified at rest.
+    Ok(value)
+}
+
+fn upcast_v2_to_v3(value: Value) -> Result<Value, StoreError> {
+    // Version 3 only adds a new event variant. Preserve v2 payload bytes and
+    // let the current enum decoder interpret the unchanged event vocabulary.
     Ok(value)
 }
 
@@ -56,13 +64,23 @@ mod tests {
     }
 
     #[test]
-    fn decodes_a_current_versioned_payload() {
+    fn decodes_a_v2_state_decay_payload_after_the_v3_upgrade() {
         let event = decode_event_payload(
-            CURRENT_EVENT_SCHEMA_VERSION,
+            2,
             r#"{"type":"state_decay_assessed","data":{"assessment":{"policy_id":"test","policy_version":"v1","risk_score_milli":800,"threshold_milli":700,"signals":{"steps_since_anchor":4,"context_pressure":0.6,"subgoal_switches":1,"recent_failures":0,"recovered_session":false},"action":"inject_anchor","reason":"calibrated risk","metadata":null}}}"#,
         )
         .unwrap();
         assert!(matches!(event, EventKind::StateDecayAssessed { .. }));
+    }
+
+    #[test]
+    fn decodes_a_current_semantic_memory_retrieval_payload() {
+        let event = decode_event_payload(
+            CURRENT_EVENT_SCHEMA_VERSION,
+            r#"{"type":"semantic_memory_retrieved","data":{"retrieval":{"query":"postgres recovery","algorithm":"hybrid_lexical_v1","hits":[]}}}"#,
+        )
+        .unwrap();
+        assert!(matches!(event, EventKind::SemanticMemoryRetrieved { .. }));
     }
 
     #[test]

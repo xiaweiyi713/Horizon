@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    AgentState, CognitiveState, EventKind, EventRecord, InterventionAssessment, RunId, TaskId,
-    TaskRecord, TaskStatus, ToolResult,
+    AgentState, CognitiveState, EventKind, EventRecord, InterventionAssessment, MemoryId,
+    MemoryItem, RunId, SemanticMemoryRetrieval, TaskId, TaskRecord, TaskStatus, ToolResult,
 };
 
 /// Materialized, deterministic view of a run. It can always be rebuilt from
@@ -27,6 +27,18 @@ pub struct RunProjection {
     /// stream remains authoritative for a full audit.
     #[serde(default)]
     pub tool_results: Vec<ToolResult>,
+    /// Immutable semantic-memory source records indexed by their stable IDs.
+    /// They are reconstructed from `memory_created` events and deliberately
+    /// live outside the compact cognitive summary so retrieval remains an
+    /// explicit, auditable policy action.
+    #[serde(default)]
+    pub semantic_memories: BTreeMap<MemoryId, MemoryItem>,
+    /// Number of persisted semantic-memory query boundaries.
+    #[serde(default)]
+    pub semantic_memory_retrievals: u64,
+    /// Most recent query and the exact ranked records returned by it.
+    #[serde(default)]
+    pub last_semantic_memory_retrieval: Option<SemanticMemoryRetrieval>,
     /// Number of policy boundaries durably assessed for behavioral state decay.
     #[serde(default)]
     pub intervention_assessments: u64,
@@ -55,6 +67,9 @@ impl RunProjection {
             tasks: BTreeMap::new(),
             completed_operations: BTreeSet::new(),
             tool_results: Vec::new(),
+            semantic_memories: BTreeMap::new(),
+            semantic_memory_retrievals: 0,
+            last_semantic_memory_retrieval: None,
             intervention_assessments: 0,
             last_intervention_assessment: None,
             last_checkpoint_sequence: 0,
@@ -187,19 +202,29 @@ impl RunProjection {
                 self.completed_operations.insert(operation_id.clone());
             }
             EventKind::ProcessCompleted { .. } => {}
-            EventKind::MemoryCreated { memory } => match memory.kind {
-                crate::MemoryKind::Goal => {
-                    self.cognitive.primary_goal = Some(memory.content.clone())
+            EventKind::MemoryCreated { memory } => {
+                if self.semantic_memories.contains_key(&memory.id) {
+                    return Err(ProjectionError::DuplicateMemory(memory.id));
                 }
-                crate::MemoryKind::Constraint => {
-                    self.cognitive.constraints.push(crate::Constraint {
-                        id: memory.id.to_string(),
-                        content: memory.content.clone(),
-                        source: Some("memory".to_owned()),
-                    })
+                self.semantic_memories.insert(memory.id, memory.clone());
+                match memory.kind {
+                    crate::MemoryKind::Goal => {
+                        self.cognitive.primary_goal = Some(memory.content.clone())
+                    }
+                    crate::MemoryKind::Constraint => {
+                        self.cognitive.constraints.push(crate::Constraint {
+                            id: memory.id.to_string(),
+                            content: memory.content.clone(),
+                            source: Some("memory".to_owned()),
+                        })
+                    }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
+            EventKind::SemanticMemoryRetrieved { retrieval } => {
+                self.semantic_memory_retrievals = self.semantic_memory_retrievals.saturating_add(1);
+                self.last_semantic_memory_retrieval = Some(retrieval.clone());
+            }
             EventKind::FailureRemembered { failure } => {
                 self.cognitive.failed_attempts.push(failure.clone())
             }
@@ -260,6 +285,8 @@ pub enum ProjectionError {
     RetryAttemptMismatch { expected: u32, actual: u32 },
     #[error("checkpoint payload sequence {payload} does not match event sequence {event}")]
     CheckpointSequenceMismatch { payload: u64, event: u64 },
+    #[error("semantic memory {0} was created more than once")]
+    DuplicateMemory(MemoryId),
     #[error(transparent)]
     InvalidState(#[from] crate::StateTransitionError),
     #[error(transparent)]
@@ -307,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn v0_2_snapshot_without_learned_intervention_fields_remains_readable() {
+    fn legacy_snapshot_without_later_policy_fields_remains_readable() {
         let run_id = RunId::new();
         let projection = RunProjection::empty(run_id);
         let mut snapshot = serde_json::to_value(projection).unwrap();
@@ -317,9 +344,15 @@ mod tests {
         // destructive rewrite of operator data.
         object.remove("intervention_assessments");
         object.remove("last_intervention_assessment");
+        object.remove("semantic_memories");
+        object.remove("semantic_memory_retrievals");
+        object.remove("last_semantic_memory_retrieval");
         let decoded: RunProjection = serde_json::from_value(snapshot).unwrap();
         assert_eq!(decoded.run_id, run_id);
         assert_eq!(decoded.intervention_assessments, 0);
         assert_eq!(decoded.last_intervention_assessment, None);
+        assert!(decoded.semantic_memories.is_empty());
+        assert_eq!(decoded.semantic_memory_retrievals, 0);
+        assert_eq!(decoded.last_semantic_memory_retrieval, None);
     }
 }

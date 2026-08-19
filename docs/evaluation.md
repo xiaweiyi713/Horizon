@@ -25,13 +25,17 @@ HorizonBench implements these metrics:
 | B2 | Vector retrieval |
 | B3 | Structured passive memory |
 | H | Proactive durable cognitive state |
+| S | Durable semantic-memory retrieval (`hybrid_lexical_v1`) |
+| S-off | Same policy with `semantic_memory_limit=0` |
 | L | Learned state-decay predictor + adaptive context-budget controller |
 | L-fixed | Same learned predictor with a fixed intervention threshold |
 
 Include `Horizon_always_on_anchor` as a control for the token/performance
 tradeoff. Compare `L` and `L-fixed` on the same frozen model artifact to isolate
 adaptive threshold/cost control. The planned ablations are State Anchor, failure
-memory, checkpoint recovery, and structured cognitive state.
+memory, checkpoint recovery, and structured cognitive state. Add `S` versus
+`S-off` on the same frozen model, prompts, and memory catalog to isolate the
+behavioral value and token cost of retrieval.
 
 ## Reproducibility record
 
@@ -66,3 +70,18 @@ estimated compact/anchor token counts, and run-budget pressure are persisted in
 
 The synthetic examples and smoke tests validate schema and runtime plumbing;
 they are not evidence that the learned predictor improves any benchmark.
+
+## Semantic-memory retrieval protocol
+
+For every memory-enabled episode, retain the immutable `memory_created` source
+events and the resulting `semantic_memory_retrieved` events. Report retrieval
+precision@k and recall@k against a predeclared relevant-memory set, empty-query
+rate, mean selected-memory tokens, and the existing task/recovery metrics. The
+retrieval-on/off comparison must use the same source catalog, run seeds, model,
+and prompt. Do not score a record as relevant only because the retrieval policy
+selected it.
+
+The built-in `hybrid_lexical_v1` implementation is a local deterministic
+baseline, not a claim of neural embedding quality. If a later embedding backend
+is compared, persist a distinct algorithm/revision identifier and hold the
+catalog and evaluation labels fixed.

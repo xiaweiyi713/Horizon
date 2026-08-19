@@ -26,8 +26,14 @@
 - HTTP/native/Python policy integration plus held-out calibration metrics
 - HorizonBench learned-adaptive versus fixed-threshold research controls
 
+## v0.4 — implemented semantic-memory baseline
+
+- Source-attributed durable semantic-memory catalog in `RunProjection`
+- Deterministic bounded `hybrid_lexical_v1` retrieval with replayable hits
+- Python compact-context integration and retrieval-off configuration control
+- Retrieval audit protocol and schema-v3 compatibility boundaries
+
 ## Research version
 
-- Semantic-memory layer and retrieval ablations
 - Cross-model evaluation and held-out public benchmark adapters
 - Cross-domain long-horizon workflows and a technical report
