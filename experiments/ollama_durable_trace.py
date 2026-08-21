@@ -1,10 +1,10 @@
 """Run a reproducible real-model durable-trace mechanism smoke with Ollama.
 
-This utility is intentionally narrow.  It uses Horizon's bundled
-durable-trace fixture to validate a real local model → Python policy → Rust
-runtime → objective trace judge path, including frozen Anchor controls.  It is
-an integration/mechanism smoke, not a public benchmark or a claim that Horizon
-improves a model.
+This utility is intentionally narrow. It uses a task-owned, model-readable
+durable-trace mechanism suite to validate a real local model → Python policy →
+Rust runtime → objective trace judge path, including frozen Anchor controls.
+It is an integration/mechanism smoke, not a public benchmark or a claim that
+Horizon improves a model.
 
 The model digest is read from Ollama before planning and is embedded in every
 manifest row.  The runner writes all generated artifacts below an empty output
@@ -47,9 +47,9 @@ from benchmarks.horizonbench.score_matrix import score_matrix  # noqa: E402
 from horizon_agent import HorizonApiError, HorizonClient  # noqa: E402
 
 
-DEFAULT_TASKS = ROOT / "benchmarks" / "horizonbench" / "fixtures" / "durable_trace_tasks.jsonl"
+DEFAULT_TASKS = ROOT / "experiments" / "ollama_durable_trace_tasks_v2.jsonl"
 DEFAULT_CONDITIONS = ROOT / "experiments" / "ollama_durable_trace_conditions_v1.json"
-DEFAULT_PROMPT = ROOT / "experiments" / "ollama_durable_trace_prompt_v1.txt"
+DEFAULT_PROMPT = ROOT / "experiments" / "ollama_durable_trace_prompt_v2.txt"
 EXECUTOR_SPEC = "benchmarks.horizonbench.openai_compatible_trace_executor:execute"
 
 
@@ -345,9 +345,9 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tasks", type=Path, default=DEFAULT_TASKS)
     parser.add_argument("--conditions", type=Path, default=DEFAULT_CONDITIONS)
     parser.add_argument("--prompt", type=Path, default=DEFAULT_PROMPT)
-    parser.add_argument("--source-name", default="horizon-durable-trace-fixture")
-    parser.add_argument("--source-revision", default="fixture-v1")
-    parser.add_argument("--prompt-revision", default="ollama-durable-trace-prompt-v1")
+    parser.add_argument("--source-name", default="horizon-ollama-durable-trace-mechanism")
+    parser.add_argument("--source-revision", default="v2")
+    parser.add_argument("--prompt-revision", default="ollama-durable-trace-prompt-v2")
     parser.add_argument("--seeds", default="17", help="comma-separated unique integer seeds")
     parser.add_argument("--max-tokens", type=int, default=512)
     parser.add_argument("--checkpoint-cadence", type=int, default=1)

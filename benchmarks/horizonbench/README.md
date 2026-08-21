@@ -14,7 +14,9 @@ HorizonBench v0.1 is a 30-task microbenchmark for durable execution state:
 Each agent adapter produces one JSONL row per task. The required fields are
 `task_id`, `category`, `success`, `goal_retained`, and
 `constraint_violations`; optional fields capture failures, recovery, tokens,
-and anchors. Score a real run with:
+anchors, and a short non-metric `diagnostic` label. The diagnostic is capped at
+512 characters and must never contain a model response, provider HTTP body,
+prompt, credential, or credential-bearing URL. Score a real run with:
 
 ```bash
 python3 benchmarks/horizonbench/score_runs.py results/my-agent.jsonl

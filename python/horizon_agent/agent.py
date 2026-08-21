@@ -643,6 +643,17 @@ class DurableAgent:
         failures = DurableAgent._compact_records(cognitive.get("failed_attempts"), "approach", limit=3)
         if failures:
             lines.append("- Known failed approaches: {}".format(" | ".join(failures)))
+        # Keep progress observable without turning compact context into a
+        # transcript or a full State Anchor. A policy can then finish after it
+        # has persisted the task's required fact instead of repeating the same
+        # action merely because evidence/decisions are omitted from this view.
+        lines.append(
+            "- Durable records: decisions={}, evidence={}, remembered failures={}".format(
+                DurableAgent._record_count(cognitive.get("decisions")),
+                DurableAgent._record_count(cognitive.get("evidence")),
+                DurableAgent._record_count(cognitive.get("failed_attempts")),
+            )
+        )
         lines.append("Choose one next action.")
         return "\n".join(lines)
 
@@ -674,6 +685,14 @@ class DurableAgent:
             if len(records) >= limit:
                 break
         return records
+
+    @staticmethod
+    def _record_count(value: Any) -> int:
+        """Count durable record objects without rendering their full content."""
+
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+            return 0
+        return sum(isinstance(item, Mapping) for item in value)
 
     @staticmethod
     def _truncate_compact_value(value: str, *, limit: int = 240) -> str:

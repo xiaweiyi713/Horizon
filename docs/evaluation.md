@@ -77,6 +77,10 @@ Every model-backed run should save:
 - fault schedule and expected recovery behavior;
 - raw JSONL episode outcomes plus aggregate score.
 
+`EpisodeResult.diagnostic` 是可选、最长 512 个字符的运行排查标签，不参与任何评分。
+真实模型实验应只写受控的错误类别，不能写模型响应、provider HTTP 正文、prompt、密钥
+或带凭据的 URL。
+
 The built-in synthetic smoke suite validates this data path but is not an
 empirical LLM result.
 

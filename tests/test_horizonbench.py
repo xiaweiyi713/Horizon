@@ -50,6 +50,39 @@ class HorizonBenchTests(unittest.TestCase):
         self.assertEqual(metrics.repeated_failure_rate, 0.5)
         self.assertEqual(metrics.tokens_per_successful_task, 30.0)
 
+    def test_optional_diagnostic_is_not_a_metric_and_is_bounded(self) -> None:
+        result = EpisodeResult.from_mapping(
+            {
+                "task_id": "diagnostic-task",
+                "category": "goal_retention",
+                "success": False,
+                "goal_retained": True,
+                "constraint_violations": 0,
+                "diagnostic": "  agent reached max steps  ",
+            }
+        )
+        self.assertEqual(result.diagnostic, "agent reached max steps")
+        with self.assertRaisesRegex(ValueError, "diagnostic"):
+            EpisodeResult.from_mapping(
+                {
+                    "task_id": "bad-diagnostic",
+                    "category": "goal_retention",
+                    "success": False,
+                    "goal_retained": True,
+                    "constraint_violations": 0,
+                    "diagnostic": {"not": "a string"},
+                }
+            )
+        with self.assertRaisesRegex(ValueError, "at most"):
+            EpisodeResult(
+                task_id="long-diagnostic",
+                category="goal_retention",
+                success=False,
+                goal_retained=True,
+                constraint_violations=0,
+                diagnostic="x" * 513,
+            )
+
     def test_reference_suite_includes_requested_ablations(self) -> None:
         report = run_suite(load_scenarios(), default_strategies(include_ablations=True))
         names = set(report["strategies"])

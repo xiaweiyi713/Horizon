@@ -30,12 +30,13 @@ JSONL and command-line contract.
 
 ## Windows GPU 上的真实模型机制 smoke
 
-`ollama_durable_trace.py` 是面向本地 Ollama 的可复现实验入口。它会先从
-`/api/tags` 读取所选模型的不可变 digest，再冻结 model × condition × seed matrix，
-运行无副作用 preflight，启动独立的 Rust HTTP runtime，并保存 receipt、原始
-EpisodeResult、评分和实验摘要。它使用 bundled durable-trace task fixture 来验证
-真实模型到运行时的完整链路，**不是**公共 benchmark，也不能用来声称 Horizon 改善了
-某个模型。
+`ollama_durable_trace.py` 是面向本地 Ollama 的可复现实验入口。默认任务集为
+`ollama_durable_trace_tasks_v2.jsonl`；它会先从 `/api/tags` 读取所选模型的不可变
+digest，再冻结 model × condition × seed matrix，运行无副作用 preflight，启动独立的 Rust
+HTTP runtime，并保存 receipt、原始 EpisodeResult、评分和实验摘要。它使用模型可读的
+durable-trace mechanism suite 来验证
+真实模型到运行时的完整链路；该 suite 的 Approved plan 明确给出每一个持久化动作，因而
+它**不是**公共 benchmark，也不能用来声称 Horizon 改善了某个模型。
 
 Windows / WSL 中先启动指向本地权重目录的 Ollama（示例使用现有的 Qwen2.5 7B）：
 
@@ -78,6 +79,10 @@ PYTHONPATH=python:. python3 experiments/ollama_durable_trace.py \
 ```bash
 watch -n 1 /usr/lib/wsl/lib/nvidia-smi
 ```
+
+每一条 `EpisodeResult` 可选带有受限的 `diagnostic` 运行类别，用于区分例如
+`agent reached max_steps`、策略调用失败和被拒绝的策略动作。它不是评分指标；真实模型
+响应、provider HTTP 正文、prompt、密钥或带凭据 URL 都不得写入此字段。
 
 ## Cross-domain workflow study
 

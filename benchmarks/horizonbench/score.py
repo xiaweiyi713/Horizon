@@ -13,6 +13,26 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
 
+_MAX_DIAGNOSTIC_CHARS = 512
+
+
+def _normalize_diagnostic(value: Any) -> Optional[str]:
+    """Validate a small operational label without allowing unbounded payloads."""
+
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("benchmark result diagnostic must be a string or null")
+    normalized = " ".join(value.split())
+    if not normalized:
+        raise ValueError("benchmark result diagnostic must not be blank")
+    if len(normalized) > _MAX_DIAGNOSTIC_CHARS:
+        raise ValueError(
+            "benchmark result diagnostic must be at most {} characters".format(_MAX_DIAGNOSTIC_CHARS)
+        )
+    return normalized
+
+
 @dataclass(frozen=True)
 class EpisodeResult:
     """Observable outcome for one benchmark task.
@@ -35,6 +55,12 @@ class EpisodeResult:
     state_consistent: bool = False
     tokens: int = 0
     anchors_injected: int = 0
+    # Optional bounded operational context. It is deliberately not a score and
+    # must not contain an unredacted provider transcript or credential.
+    diagnostic: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "diagnostic", _normalize_diagnostic(self.diagnostic))
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "EpisodeResult":
@@ -60,6 +86,7 @@ class EpisodeResult:
             state_consistent=bool(value.get("state_consistent", False)),
             tokens=max(0, int(value.get("tokens", 0))),
             anchors_injected=max(0, int(value.get("anchors_injected", 0))),
+            diagnostic=value.get("diagnostic"),
         )
 
     def repeated_failure_count(self) -> int:

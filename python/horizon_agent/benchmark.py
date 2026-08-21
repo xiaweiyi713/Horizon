@@ -398,6 +398,7 @@ class DurableTraceJudge:
             "anchors_injected": _non_negative_int(
                 run_result.anchors_injected, "run_result.anchors_injected"
             ),
+            "diagnostic": _bounded_run_diagnostic(run_result.error),
         }
 
     def preflight(self, context: Any) -> dict[str, Json]:
@@ -529,6 +530,25 @@ def _non_negative_int(value: Any, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise BenchmarkExecutionError("{} must be a non-negative integer".format(label))
     return value
+
+
+def _bounded_run_diagnostic(value: Any) -> Optional[str]:
+    """Return a safe operational class rather than provider/runtime error text."""
+
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise BenchmarkExecutionError("run_result.error must be a string or null")
+    normalized = " ".join(value.split())
+    if not normalized:
+        return None
+    if normalized in {"configured budget exhausted", "agent reached max_steps"}:
+        return normalized
+    if normalized.startswith("LLM policy call failed:"):
+        return "LLM policy call failed"
+    if normalized.startswith("action `") and " rejected:" in normalized:
+        return "policy action rejected"
+    return "agent stopped with an unclassified error"
 
 
 __all__ = [

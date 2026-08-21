@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from experiments import ollama_durable_trace as launcher  # noqa: E402
+from benchmarks.horizonbench.adapters import JsonlTaskAdapter  # noqa: E402
 
 
 class _Response:
@@ -61,6 +62,16 @@ class OllamaDurableTraceLauncherTests(unittest.TestCase):
         self.assertEqual(launcher._parse_seeds("17,23"), [17, 23])
         with self.assertRaisesRegex(launcher.OllamaExperimentError, "duplicates"):
             launcher._parse_seeds("17,17")
+
+    def test_default_mechanism_tasks_are_held_out_and_have_objective_trace_checks(self) -> None:
+        tasks = JsonlTaskAdapter("ollama-mechanism", "v2").load(launcher.DEFAULT_TASKS)
+        self.assertEqual(
+            tasks.task_ids,
+            ("ollama-trace-evidence-01", "ollama-trace-failure-02", "ollama-trace-decision-03"),
+        )
+        self.assertTrue(
+            all("horizon_trace_expectation" in task.metadata for task in tasks.tasks)
+        )
 
 
 if __name__ == "__main__":

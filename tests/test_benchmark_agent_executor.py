@@ -17,6 +17,7 @@ from horizon_agent.benchmark import (  # noqa: E402
     BenchmarkExecutionError,
     DurableAgentEpisodeExecutor,
     DurableTraceJudge,
+    _bounded_run_diagnostic,
     agent_config_from_condition,
     initial_plan_from_task,
 )
@@ -83,7 +84,12 @@ class BenchmarkAgentExecutorTests(unittest.TestCase):
             {"type": "agent_recovered"},
             {"type": "state_transitioned"},
         ]
-        outcome = DurableTraceJudge()(context, RunResult("run-1", "completed", 6, 42, 1), _projection(context), events)
+        outcome = DurableTraceJudge()(
+            context,
+            RunResult("run-1", "completed", 6, 42, 1, "agent reached max_steps"),
+            _projection(context),
+            events,
+        )
 
         self.assertTrue(outcome["success"])
         self.assertTrue(outcome["goal_retained"])
@@ -92,6 +98,21 @@ class BenchmarkAgentExecutorTests(unittest.TestCase):
         self.assertTrue(outcome["recovery_succeeded"])
         self.assertIsNone(outcome["recovery_distance"])
         self.assertEqual(outcome["tokens"], 42)
+        self.assertEqual(outcome["diagnostic"], "agent reached max_steps")
+
+    def test_trace_judge_diagnostic_uses_a_safe_operational_class(self) -> None:
+        self.assertEqual(
+            _bounded_run_diagnostic("LLM policy call failed: provider body with task transcript"),
+            "LLM policy call failed",
+        )
+        self.assertEqual(
+            _bounded_run_diagnostic("action `record_evidence` rejected: provider detail"),
+            "policy action rejected",
+        )
+        self.assertEqual(
+            _bounded_run_diagnostic("unexpected internal detail"),
+            "agent stopped with an unclassified error",
+        )
 
     def test_trace_judge_rejects_missing_expectations_and_forbidden_events(self) -> None:
         context = _context(
@@ -256,6 +277,7 @@ class BenchmarkAgentExecutorTests(unittest.TestCase):
                 "current_plan": ["step {}".format(index) for index in range(4)],
                 "failed_attempts": [{"approach": "failed {}".format(index)} for index in range(4)],
                 "evidence": [{"content": "full-anchor-only evidence"}],
+                "decisions": [{"decision": "one bounded decision"}],
             },
         }
         compact = DurableAgent._compact_context(projection)
@@ -267,6 +289,7 @@ class BenchmarkAgentExecutorTests(unittest.TestCase):
         self.assertIn("Known failed approaches: failed 0 | failed 1 | failed 2", compact)
         self.assertNotIn("failed 3", compact)
         self.assertNotIn("full-anchor-only evidence", compact)
+        self.assertIn("Durable records: decisions=1, evidence=1, remembered failures=4", compact)
 
 
 if __name__ == "__main__":
