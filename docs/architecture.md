@@ -93,7 +93,10 @@ environment
 budget
 ```
 
-The memory crate renders this into a compact State Anchor. A State Anchor is
+The memory crate renders this into a compact State Anchor. Both full Anchors
+and ordinary compact policy context expose bounded counts for decisions,
+evidence, and remembered failures before their detailed sections, so a policy
+can determine progress without inferring it from prose. A State Anchor is
 persisted as an event, so its trigger and contents are auditable.
 
 ## Scheduler and processes

@@ -71,6 +71,10 @@ HorizonBench 中，把 `anchor_strategy` 放进冻结的 `configuration.agent`�
 该条件的 `policy_revision` 作为 assessment 版本。固定策略不能和
 `learned_intervention_policy` 同时配置。
 
+无论注入完整 Anchor 还是使用 compact context，策略都会看到同一行受限进度摘要：
+`Durable records: decisions=N, evidence=N, remembered failures=N`。完整 Anchor 随后才
+展示相应记录的细节，避免模型靠重复文本推断计划中的计数条件。
+
 ## Manifest-bound HorizonBench episodes
 
 `DurableAgentEpisodeExecutor` is the model-backed bridge for a frozen

@@ -201,6 +201,15 @@ impl CognitiveState {
             self.constraints.iter().map(|item| item.content.clone()),
         );
         section(&mut lines, "Current Plan", self.current_plan.iter().cloned());
+        // Keep the same bounded progress facts available in full Anchors and
+        // compact Python context. A policy can therefore evaluate a plan step
+        // such as "if evidence=0" without inferring counts from repeated prose.
+        lines.push(format!(
+            "Durable records: decisions={}, evidence={}, remembered failures={}",
+            self.decisions.len(),
+            self.evidence.len(),
+            self.failed_attempts.len()
+        ));
         section(
             &mut lines,
             "Open Subgoals",
@@ -411,4 +420,43 @@ pub struct EventRecord {
     pub event: EventKind,
     #[serde(default)]
     pub metadata: Value,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CognitiveState, DecisionRecord, EvidenceRecord, FailureRecord};
+
+    #[test]
+    fn rendered_anchor_exposes_durable_record_counts_before_detail_sections() {
+        let state = CognitiveState {
+            current_plan: vec!["Persist each required durable record once.".to_owned()],
+            decisions: vec![DecisionRecord {
+                id: "decision-1".to_owned(),
+                decision: "Use the checkpointed rollback path.".to_owned(),
+                rationale: "It preserves the frozen artifact.".to_owned(),
+            }],
+            evidence: vec![EvidenceRecord {
+                id: "evidence-1".to_owned(),
+                content: "The checksum matches.".to_owned(),
+                source: None,
+            }],
+            failed_attempts: vec![FailureRecord {
+                id: "failure-1".to_owned(),
+                approach: "restart from event zero".to_owned(),
+                reason: "It discards durable progress.".to_owned(),
+                operation_id: None,
+                retryable: false,
+            }],
+            ..CognitiveState::default()
+        };
+
+        let anchor = state.render_anchor();
+        let counts = "Durable records: decisions=1, evidence=1, remembered failures=1";
+        assert!(anchor.contains(counts));
+        let counts_index = anchor.find(counts).expect("Anchor should include record counts");
+        let decisions_index = anchor
+            .find("Important Decisions:")
+            .expect("Anchor should include the decision detail section");
+        assert!(counts_index < decisions_index);
+    }
 }
