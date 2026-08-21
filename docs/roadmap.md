@@ -92,9 +92,21 @@
 - Frozen model tags/digests, task/prompt/runtime identities, per-condition observations, and bounded
   operational diagnostics without reproducing raw model/provider text
 
+## v1.2 — implemented objective artifact-workspace task environment
+
+- Strict task-owned `horizon_artifact_workspace_v1` schema with immutable templates, explicit
+  writable paths, safe normalized paths, and exact text/JSON verification
+- `invoke_adapter` DurableAgent action bound to `AdapterRegistry`, with bounded JSON-safe input
+  validation before its durable invocation event is written
+- Persistent operation receipts for restart-safe stable operation IDs, without retaining model
+  candidate contents in the receipt
+- Objective judge requiring a completed durable run, retained goal/constraint, a real adapter
+  invocation, a durable verified terminal result, and an independently verified artifact
+- Static OpenAI-compatible preflight plus no-network real-Rust-runtime integration coverage via
+  `make bench-artifact-workspace`; non-empty fault schedules remain explicitly unsupported
+
 ## Research execution
 
-- Configure task-environment executors for selected model backbones, add their
-  static preflight hooks, collect objective held-out outcomes, and publish the
-  resulting technical report. Public artifact/domain tasks and fault schedules
-  still require their own environment-specific judge.
+- Freeze selected model backbones and held-out artifact tasks, run the objective
+  workspace executor across seeds/conditions, and publish the resulting technical report.
+  Public domain tasks and fault schedules still require their own environment-specific judge.

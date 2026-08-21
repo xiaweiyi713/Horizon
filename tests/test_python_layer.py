@@ -366,6 +366,86 @@ class PythonLayerTests(unittest.TestCase):
         self.assertEqual(client.calls[-1][4], "failed")
         self.assertIn("upstream unavailable", client.calls[-1][6])
 
+    def test_durable_agent_invokes_registered_adapter_with_a_bounded_audit_input(self) -> None:
+        client = _RecordingClient()
+        registry = AdapterRegistry(
+            [
+                FunctionAdapter(
+                    "artifact_workspace",
+                    lambda request: AdapterResult(
+                        output={"verified": True, "operation": request.operation_id},
+                        metadata={"environment": "fixture"},
+                    ),
+                )
+            ]
+        )
+        agent = DurableAgent(client, ScriptedProvider([]), adapters=registry)
+        tracker = InterventionTracker()
+        action = AgentAction(
+            action_type="invoke_adapter",
+            data={
+                "adapter": "artifact_workspace",
+                "operation_id": "artifact:task-1",
+                "input": {"files": [{"path": "answer.json", "content": "{}"}]},
+                "task_id": "task-1",
+            },
+        )
+
+        self.assertFalse(agent._apply_action("run-adapter", action, tracker))
+        self.assertEqual(client.calls[0][0], "invoked")
+        self.assertEqual(client.calls[0][3], "artifact_workspace")
+        self.assertEqual(client.calls[1][0], "result")
+        self.assertEqual(client.calls[1][4], "succeeded")
+        self.assertEqual(client.calls[1][8]["task_id"], "task-1")
+
+        compact = agent._compact_context(
+            {
+                "state": "executing",
+                "tasks": {},
+                "cognitive": {},
+                "tool_results": [
+                    {
+                        "tool": "artifact_workspace",
+                        "status": "succeeded",
+                        "operation_id": "artifact:task-1",
+                        "output": {"raw": "do not put this in compact context"},
+                    }
+                ],
+            }
+        )
+        self.assertIn("artifact_workspace [succeeded] (operation artifact:task-1)", compact)
+        self.assertNotIn("do not put this", compact)
+
+        with self.assertRaisesRegex(ValueError, "configured AdapterRegistry"):
+            DurableAgent(client, ScriptedProvider([]))._apply_action("run", action, tracker)
+        with self.assertRaisesRegex(ValueError, "unrecognized fields"):
+            agent._apply_action(
+                "run-adapter",
+                AgentAction(
+                    action_type="invoke_adapter",
+                    data={
+                        "adapter": "artifact_workspace",
+                        "operation_id": "artifact:task-1",
+                        "input": {},
+                        "unexpected": True,
+                    },
+                ),
+                tracker,
+            )
+        with self.assertRaisesRegex(ValueError, "operation_id must be at most"):
+            agent._apply_action(
+                "run-adapter",
+                AgentAction(
+                    action_type="invoke_adapter",
+                    data={
+                        "adapter": "artifact_workspace",
+                        "operation_id": "x" * 257,
+                        "input": {},
+                    },
+                ),
+                tracker,
+            )
+
     def test_native_wrapper_uses_the_same_command_shape_as_http_client(self) -> None:
         original_runtime = native_module._NativeRuntime
 

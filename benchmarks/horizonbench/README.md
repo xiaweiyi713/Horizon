@@ -266,6 +266,104 @@ The profile and manifest schemas reject unrecognized top-level fields: put
 provider decoding controls in `decoding` and policy-specific controls in
 `configuration` so every effective setting is hashed.
 
+## Objective artifact-workspace execution
+
+`benchmarks.horizonbench.openai_compatible_artifact_workspace_executor:execute`
+is the opt-in executor for a bounded file-artifact task. It runs a real
+`DurableAgent`, but success belongs to the task environment—not to an LLM
+`finish` action. The model must call the registered `artifact_workspace`
+adapter, the adapter can write only task-declared relative paths, and an exact
+text or semantic-JSON verifier checks the materialized artifact. The judge
+also requires the retained goal/constraint, a real adapter invocation, a
+durably recorded verified terminal result, and a completed runtime projection.
+
+Each selected task includes its normal `initial_plan` plus this strict metadata
+object (no unrecognized fields are accepted):
+
+```json
+{
+  "horizon_artifact_workspace_v1": {
+    "schema_version": 1,
+    "adapter_name": "artifact_workspace",
+    "template_files": [
+      {"path": "input/brief.txt", "content": "Create a JSON approval artifact."}
+    ],
+    "writable_paths": ["answer.json"],
+    "verifier": {
+      "kind": "json_exact",
+      "path": "answer.json",
+      "expected": {"approved": true}
+    }
+  }
+}
+```
+
+The workspace rejects absolute paths, traversal, hidden segments, symlinks,
+template/writable overlaps, unknown fields, duplicate paths, and oversized
+content. A policy submits the candidate via the frozen prompt contract:
+
+```json
+{
+  "type": "invoke_adapter",
+  "data": {
+    "adapter": "artifact_workspace",
+    "operation_id": "artifact:task-001:write",
+    "task_id": "task-001",
+    "input": {
+      "files": [{"path": "answer.json", "content": "{\"approved\":true}"}]
+    }
+  }
+}
+```
+
+The operation receipt stored beside the workspace contains a submitted-input
+SHA-256 and safe verification observation, not the candidate contents. A new
+Python process that repeats the same stable operation ID returns that recorded
+terminal result instead of rewriting the artifact. This is still at-least-once
+delivery around the boundary: a crash between the write and receipt may cause
+one safe replay, and a non-empty matrix `fault_schedule` is rejected until a
+task environment can genuinely enact and observe it.
+
+This is intentionally a restricted artifact verifier, **not** a complete
+process/container security sandbox. It runs no shell command and provides no
+arbitrary filesystem access. In v1 the adapter only accepts candidate writes;
+put instructions needed by the model in the frozen goal, constraint, and
+approved plan. Never copy `verifier.expected` into those model-visible fields
+for an empirical held-out task.
+
+Start a separate runtime with automatic checkpoints disabled, then configure
+the model endpoint and a persistent, caller-owned root for auditable workspace
+artifacts:
+
+```bash
+cargo run -p horizon-cli -- --db results/artifact-workspace.db --checkpoint-every 0 serve
+
+export HORIZON_BENCH_RUNTIME_URL=http://127.0.0.1:8787
+export HORIZON_BENCH_API_BASE_URL=https://YOUR_COMPATIBLE_ENDPOINT/v1
+export HORIZON_BENCH_API_KEY=YOUR_KEY  # or OPENAI_API_KEY
+export HORIZON_BENCH_ARTIFACT_ROOT="$PWD/results/artifact-workspace-files"
+
+# Static only: validates task schema, prompt contract, provider controls and
+# root configuration. It does not create the root or contact either endpoint.
+PYTHONPATH=python:. python3 benchmarks/horizonbench/preflight_matrix.py \
+  --matrix results/artifact-matrix.jsonl --tasks data/artifact-tasks.jsonl \
+  --source-name ARTIFACT_TASKS --source-revision IMMUTABLE_RELEASE \
+  --executor benchmarks.horizonbench.openai_compatible_artifact_workspace_executor:execute
+
+PYTHONPATH=python:. python3 benchmarks/horizonbench/execute_matrix.py \
+  --matrix results/artifact-matrix.jsonl --tasks data/artifact-tasks.jsonl \
+  --source-name ARTIFACT_TASKS --source-revision IMMUTABLE_RELEASE \
+  --executor benchmarks.horizonbench.openai_compatible_artifact_workspace_executor:execute \
+  --results-dir results
+```
+
+Retain the frozen matrix/task source, per-run result JSONL and receipt, durable
+runtime database/events, and `HORIZON_BENCH_ARTIFACT_ROOT` directory together.
+They provide the evidence chain from frozen task contract to observed artifact.
+`fixtures/artifact_workspace_*` plus `make bench-artifact-workspace` exercise
+the complete path using a scripted policy and a real Rust HTTP runtime. They
+are deterministic CI coverage, not a real-model result.
+
 ## Cross-domain long-horizon workflow suite
 
 `cross_domain_tasks.jsonl` is a deterministic held-out fixture for the scoring

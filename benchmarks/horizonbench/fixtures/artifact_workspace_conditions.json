@@ -1,0 +1,15 @@
+{
+  "conditions": [
+    {
+      "condition_id": "Horizon_artifact_fixture",
+      "policy_revision": "fixture-artifact-policy-v1",
+      "configuration": {
+        "agent": {
+          "max_steps": 3,
+          "semantic_memory_limit": 0,
+          "anchor_strategy": "disabled"
+        }
+      }
+    }
+  ]
+}

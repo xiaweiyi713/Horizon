@@ -7,6 +7,18 @@ state-machine or persistence logic in Python.
 
 from .agent import AgentConfig, DurableAgent, RunResult
 from .adapters import AdapterError, AdapterRegistry, AdapterRequest, AdapterResult, FunctionAdapter
+from .artifact_benchmark import ArtifactWorkspaceJudge, DurableArtifactWorkspaceExecutor, workspace_from_root
+from .artifact_workspace import (
+    ARTIFACT_WORKSPACE_METADATA_KEY,
+    ARTIFACT_WORKSPACE_SCHEMA_VERSION,
+    ArtifactObservation,
+    ArtifactVerifier,
+    ArtifactWorkspace,
+    ArtifactWorkspaceAdapter,
+    ArtifactWorkspaceError,
+    ArtifactWorkspaceSpec,
+    WorkspaceTemplateFile,
+)
 from .benchmark import (
     BenchmarkExecutionError,
     DurableAgentEpisodeExecutor,
@@ -14,6 +26,7 @@ from .benchmark import (
     DurableTraceJudge,
     ObjectiveEpisodeJudge,
     agent_config_from_condition,
+    bounded_run_diagnostic,
     initial_plan_from_task,
     system_prompt_from_manifest,
 )
@@ -28,9 +41,20 @@ __all__ = [
     "AdapterRequest",
     "AdapterResult",
     "AdaptiveContextBudgetController",
+    "ARTIFACT_WORKSPACE_METADATA_KEY",
+    "ARTIFACT_WORKSPACE_SCHEMA_VERSION",
+    "ArtifactObservation",
+    "ArtifactVerifier",
+    "ArtifactWorkspace",
+    "ArtifactWorkspaceAdapter",
+    "ArtifactWorkspaceError",
+    "ArtifactWorkspaceJudge",
+    "ArtifactWorkspaceSpec",
     "BenchmarkExecutionError",
+    "bounded_run_diagnostic",
     "DurableAgent",
     "DurableAgentEpisodeExecutor",
+    "DurableArtifactWorkspaceExecutor",
     "DurableTraceExpectation",
     "DurableTraceJudge",
     "FunctionAdapter",
@@ -42,7 +66,9 @@ __all__ = [
     "NativeRuntimeUnavailable",
     "ObjectiveEpisodeJudge",
     "RunResult",
+    "WorkspaceTemplateFile",
     "agent_config_from_condition",
     "initial_plan_from_task",
     "system_prompt_from_manifest",
+    "workspace_from_root",
 ]

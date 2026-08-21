@@ -1,4 +1,4 @@
-.PHONY: build check test test-python fault bench bench-trace bench-preflight demo fmt lint
+.PHONY: build check test test-python fault bench bench-trace bench-artifact-workspace bench-preflight demo fmt lint
 
 build:
 	cargo build --workspace --all-features
@@ -26,6 +26,9 @@ bench:
 
 bench-trace:
 	PYTHONPATH=python:. python3 -m unittest tests/test_durable_trace_matrix_integration.py -v
+
+bench-artifact-workspace:
+	PYTHONPATH=python:. python3 -m unittest tests/test_artifact_workspace_matrix_integration.py -v
 
 bench-preflight:
 	PYTHONPATH=python:. python3 -m unittest tests/test_horizonbench_preflight.py -v

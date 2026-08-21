@@ -133,6 +133,37 @@ deduplicate or query. This is intentionally at-least-once behavior. Pair known
 non-retryable failures with `remember_failure` when policy behavior should be
 blocked as well.
 
+### 受限 artifact workspace adapter
+
+`ArtifactWorkspace` 是 HorizonBench 的一个小型、确定性任务环境。任务元数据拥有
+immutable template、可写相对路径白名单和一个精确的文本／JSON verifier；模型没有 shell、
+任意文件路径或 Docker 控制权。把它作为注册 adapter 交给 `DurableAgent` 后，策略只能选择：
+
+```json
+{
+  "type": "invoke_adapter",
+  "data": {
+    "adapter": "artifact_workspace",
+    "operation_id": "artifact:task-001:write",
+    "task_id": "task-001",
+    "input": {
+      "files": [{"path": "answer.json", "content": "{\"accepted\":true}"}]
+    }
+  }
+}
+```
+
+`invoke_adapter` 会先限制 adapter 名、稳定操作 ID 与 JSON 输入的大小，再由
+`AdapterRegistry` 持久化调用边界。`ArtifactWorkspaceAdapter` 只接受白名单文件，并将
+验证观察值写入工作区的 operation receipt；因此 Python 重启后再次使用同一个
+`operation_id` 会返回原来的终态，而不会用新的 payload 重写已完成工件。receipt 仅保存
+输入摘要和安全的验证结果，不保存模型提交的文件内容。
+
+这是客观产物判定的基础设施，不是通用 sandbox。当前 v1 adapter 只提交候选文件内容；
+需要让模型获知的任务输入应当在冻结的 goal／constraint／approved plan 中明确给出，且真实
+评估不能把 verifier 的 `expected` 值泄漏到这些模型可见字段。完整的 task schema、静态
+preflight 和真实模型执行命令见 [HorizonBench](../benchmarks/horizonbench/README.md#objective-artifact-workspace-execution)。
+
 ## Optional native runtime
 
 The default client remains HTTP. For an in-process local SQLite runtime, build

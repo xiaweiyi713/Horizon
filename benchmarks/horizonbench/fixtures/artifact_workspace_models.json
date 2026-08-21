@@ -1,0 +1,11 @@
+{
+  "models": [
+    {
+      "model_id": "scripted-artifact-workspace-fixture",
+      "provider": "scripted",
+      "model": "fixture-scripted-policy",
+      "model_revision": "fixture-v1",
+      "decoding": {}
+    }
+  ]
+}

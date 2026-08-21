@@ -119,6 +119,11 @@ Python-owned external systems use `AdapterRegistry`. The registry writes
 `ToolInvoked` before a side effect and one normalized `ToolResultRecorded` after
 it, using the same stable operation ID as recovery/idempotency logic. This keeps
 adapters outside Rust's policy boundary without losing durable audit semantics.
+The bounded `ArtifactWorkspaceAdapter` additionally stores a task-owned
+operation receipt beside its verifier workspace, so a restarted Python process
+can return the prior terminal observation for the same operation ID without
+rewriting the artifact. It is an exact artifact-verification primitive, not a
+general filesystem or process sandbox.
 
 ## Learned intervention boundary
 

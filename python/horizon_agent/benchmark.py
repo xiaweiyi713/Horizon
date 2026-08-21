@@ -398,7 +398,7 @@ class DurableTraceJudge:
             "anchors_injected": _non_negative_int(
                 run_result.anchors_injected, "run_result.anchors_injected"
             ),
-            "diagnostic": _bounded_run_diagnostic(run_result.error),
+            "diagnostic": bounded_run_diagnostic(run_result.error),
         }
 
     def preflight(self, context: Any) -> dict[str, Json]:
@@ -532,7 +532,7 @@ def _non_negative_int(value: Any, label: str) -> int:
     return value
 
 
-def _bounded_run_diagnostic(value: Any) -> Optional[str]:
+def bounded_run_diagnostic(value: Any) -> Optional[str]:
     """Return a safe operational class rather than provider/runtime error text."""
 
     if value is None:
@@ -551,6 +551,11 @@ def _bounded_run_diagnostic(value: Any) -> Optional[str]:
     return "agent stopped with an unclassified error"
 
 
+# Kept as a private compatibility alias for existing callers/tests while new
+# task-environment judges use the explicit public name.
+_bounded_run_diagnostic = bounded_run_diagnostic
+
+
 __all__ = [
     "AgentConfigFactory",
     "AgentFactory",
@@ -564,6 +569,7 @@ __all__ = [
     "ProviderFactory",
     "SystemPromptFactory",
     "agent_config_from_condition",
+    "bounded_run_diagnostic",
     "initial_plan_from_task",
     "system_prompt_from_manifest",
 ]

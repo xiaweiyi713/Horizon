@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Sequence
 from uuid import uuid4
 
+from .adapters import AdapterRegistry
 from .client import HorizonClient
 from .memory import InterventionTracker, LearnedInterventionPolicy
 from .policies import AgentAction, JsonActionPolicy
@@ -44,6 +46,10 @@ _RUNTIME_COMMANDS = frozenset(
 )
 _TERMINAL_STATES = frozenset(("completed", "failed"))
 _ANCHOR_STRATEGIES = frozenset(("runtime_heuristic", "always", "disabled"))
+_MAX_ADAPTER_INPUT_BYTES = 32 * 1024
+_MAX_ADAPTER_NAME_BYTES = 128
+_MAX_ADAPTER_OPERATION_ID_BYTES = 256
+_MAX_ADAPTER_TASK_ID_BYTES = 256
 
 
 @dataclass
@@ -156,10 +162,14 @@ class DurableAgent:
         *,
         config: Optional[AgentConfig] = None,
         system_prompt: Optional[str] = None,
+        adapters: Optional[AdapterRegistry] = None,
     ) -> None:
+        if adapters is not None and not isinstance(adapters, AdapterRegistry):
+            raise ValueError("adapters must be an AdapterRegistry or None")
         self.client = client
         self.policy = JsonActionPolicy(provider, system_prompt=system_prompt)
         self.config = config or AgentConfig()
+        self.adapters = adapters
         validate_agent_config(self.config)
 
     def start(
@@ -287,6 +297,7 @@ class DurableAgent:
 
     def _apply_action(self, run_id: str, action: AgentAction, tracker: InterventionTracker) -> bool:
         """Apply one action and report whether it persisted a manual checkpoint."""
+        data = dict(action.data)
         if action.action_type == "checkpoint":
             self.client.checkpoint(run_id)
             return True
@@ -303,11 +314,25 @@ class DurableAgent:
                 if outcome.get("output", {}).get("Err") or outcome.get("output", {}).get("err"):
                     tracker.note_failure()
             return False
+        if action.action_type == "invoke_adapter":
+            if self.adapters is None:
+                raise ValueError("invoke_adapter requires a configured AdapterRegistry")
+            adapter_name, operation_id, adapter_input, task_id = self._normalize_adapter_request(data)
+            result = self.adapters.execute(
+                self.client,
+                run_id,
+                adapter_name,
+                operation_id,
+                adapter_input,
+                task_id=task_id,
+            )
+            if result.status != "succeeded":
+                tracker.note_failure()
+            return False
         if action.action_type == "finish":
             return self._finish(run_id)
         if action.action_type not in _RUNTIME_COMMANDS:
             raise ValueError("unknown policy action `{}`".format(action.action_type))
-        data = dict(action.data)
         if action.action_type == "create_task":
             self._normalize_task(data)
         if action.action_type == "open_subgoal":
@@ -606,6 +631,54 @@ class DurableAgent:
         subgoal.setdefault("completed", False)
 
     @staticmethod
+    def _normalize_adapter_request(
+        data: Mapping[str, Any],
+    ) -> tuple[str, str, Mapping[str, Any], Optional[str]]:
+        """Validate a bounded, durable input before an external side effect.
+
+        ``AdapterRegistry`` persists this input before invoking an adapter.  Do
+        the shape and size checks here so a malformed or huge model response
+        cannot become an unbounded durable tool-invocation record.
+        """
+
+        allowed = {"adapter", "operation_id", "input", "task_id"}
+        unknown = sorted(set(data) - allowed)
+        if unknown:
+            raise ValueError("invoke_adapter has unrecognized fields: {}".format(", ".join(unknown)))
+        adapter_name = data.get("adapter")
+        operation_id = data.get("operation_id")
+        adapter_input = data.get("input")
+        task_id = data.get("task_id")
+        if not isinstance(adapter_name, str) or not adapter_name.strip():
+            raise ValueError("invoke_adapter.adapter must be a non-empty string")
+        if not isinstance(operation_id, str) or not operation_id.strip():
+            raise ValueError("invoke_adapter.operation_id must be a non-empty string")
+        if not isinstance(adapter_input, Mapping):
+            raise ValueError("invoke_adapter.input must be an object")
+        if task_id is not None and (not isinstance(task_id, str) or not task_id.strip()):
+            raise ValueError("invoke_adapter.task_id must be a non-empty string or null")
+        for value, label, limit in (
+            (adapter_name, "adapter", _MAX_ADAPTER_NAME_BYTES),
+            (operation_id, "operation_id", _MAX_ADAPTER_OPERATION_ID_BYTES),
+            (task_id, "task_id", _MAX_ADAPTER_TASK_ID_BYTES),
+        ):
+            if value is not None and ("\x00" in value or len(value.encode("utf-8")) > limit):
+                raise ValueError(
+                    "invoke_adapter.{} must be at most {} UTF-8 bytes and cannot contain NUL".format(
+                        label, limit
+                    )
+                )
+        try:
+            encoded = json.dumps(adapter_input, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError) as error:
+            raise ValueError("invoke_adapter.input must be JSON-safe: {}".format(error)) from error
+        if len(encoded) > _MAX_ADAPTER_INPUT_BYTES:
+            raise ValueError(
+                "invoke_adapter.input must be at most {} UTF-8 bytes".format(_MAX_ADAPTER_INPUT_BYTES)
+            )
+        return adapter_name.strip(), operation_id.strip(), dict(adapter_input), task_id
+
+    @staticmethod
     def _compact_context(projection: Mapping[str, Any]) -> str:
         """Render the bounded facts needed at every ordinary decision boundary.
 
@@ -654,6 +727,9 @@ class DurableAgent:
                 DurableAgent._record_count(cognitive.get("failed_attempts")),
             )
         )
+        tool_result = DurableAgent._compact_tool_result(projection.get("tool_results"))
+        if tool_result:
+            lines.append("- Latest external tool result: {}".format(tool_result))
         lines.append("Choose one next action.")
         return "\n".join(lines)
 
@@ -693,6 +769,26 @@ class DurableAgent:
         if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
             return 0
         return sum(isinstance(item, Mapping) for item in value)
+
+    @staticmethod
+    def _compact_tool_result(value: Any) -> Optional[str]:
+        """Expose only the latest tool identity/status, never raw tool data."""
+
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or not value:
+            return None
+        latest = value[-1]
+        if not isinstance(latest, Mapping):
+            return None
+        tool = latest.get("tool")
+        status = latest.get("status")
+        operation_id = latest.get("operation_id")
+        if not all(isinstance(item, str) and item.strip() for item in (tool, status, operation_id)):
+            return None
+        return "{} [{}] (operation {})".format(
+            DurableAgent._truncate_compact_value(tool, limit=80),
+            DurableAgent._truncate_compact_value(status, limit=40),
+            DurableAgent._truncate_compact_value(operation_id, limit=96),
+        )
 
     @staticmethod
     def _truncate_compact_value(value: str, *, limit: int = 240) -> str:

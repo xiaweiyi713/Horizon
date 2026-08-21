@@ -118,6 +118,34 @@ PYTHONPATH=python:. python3 experiments/render_ollama_durable_trace_report.py \
 完整性检查和按模型 × 条件的观察值。诊断表只输出 allowlist 中的短运行类别；未识别的
 原始诊断文本会被抑制，避免意外泄露模型响应、provider 正文或凭据。
 
+## 真实模型的客观 artifact 任务
+
+若要从 mechanism smoke 进入真实任务结果，请不要把
+`ollama_durable_trace.py` 的 scripted Approved plan 当作 benchmark。应另行冻结包含
+heldout artifact task 的 JSONL、模型／条件／seed matrix 与完整 prompt，并使用
+`openai_compatible_artifact_workspace_executor`。该 executor 只允许模型通过
+`artifact_workspace` adapter 写入任务白名单中的文件，最终由精确文本／JSON verifier 判定；
+模型自己返回 `finish` 或伪造 `record_tool_result` 都不会得到成功分数。
+
+启动独立 runtime 与模型 endpoint 后，配置持久化工件根目录，再先跑静态 preflight：
+
+```bash
+export HORIZON_BENCH_RUNTIME_URL=http://127.0.0.1:8787
+export HORIZON_BENCH_API_BASE_URL=http://127.0.0.1:11435/v1
+export HORIZON_BENCH_API_KEY=ollama-local
+export HORIZON_BENCH_ARTIFACT_ROOT="$PWD/results/artifact-workspaces"
+
+PYTHONPATH=python:. python3 benchmarks/horizonbench/preflight_matrix.py \
+  --matrix results/artifact-matrix.jsonl --tasks data/artifact-tasks.jsonl \
+  --source-name ARTIFACT_TASKS --source-revision IMMUTABLE_RELEASE \
+  --executor benchmarks.horizonbench.openai_compatible_artifact_workspace_executor:execute
+```
+
+随后用相同 matrix／task 参数调用 `execute_matrix.py`，并保留结果 JSONL、receipt、
+runtime 数据库／事件与 `HORIZON_BENCH_ARTIFACT_ROOT`。详细 schema 与完整命令见
+[HorizonBench 的 artifact workspace 协议](../benchmarks/horizonbench/README.md#objective-artifact-workspace-execution)。
+这是受限 verifier 环境而非通用 shell/Docker sandbox；当前也会拒绝非空 fault schedule。
+
 ## Cross-domain workflow study
 
 For the cross-domain fixture or a compatible public source, retain its workflow

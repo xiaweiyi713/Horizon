@@ -61,6 +61,7 @@ Allowed actions:
 - record_decision: {"decision":{"id":"...","decision":"...","rationale":"..."}}
 - record_evidence: {"evidence":{"id":"...","content":"...","source":null}}
 - record_tool_invocation, record_tool_success, record_tool_failure, record_tool_result for external tool audit events
+- invoke_adapter: {"adapter":"registered-adapter","operation_id":"stable-operation-id","input":{...},"task_id":null}
 - update_environment: {"environment":{...}}
 - checkpoint, execute_ready_tasks, recover, intervene, finish, suspend
 
