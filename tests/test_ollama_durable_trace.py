@@ -63,6 +63,25 @@ class OllamaDurableTraceLauncherTests(unittest.TestCase):
         with self.assertRaisesRegex(launcher.OllamaExperimentError, "duplicates"):
             launcher._parse_seeds("17,17")
 
+    def test_models_are_strictly_frozen_and_parser_supports_repetition(self) -> None:
+        self.assertEqual(launcher._parse_models(None), ["qwen2.5:7b"])
+        self.assertEqual(
+            launcher._parse_models((" qwen2.5:7b ", "llama3.1:8b")),
+            ["qwen2.5:7b", "llama3.1:8b"],
+        )
+        with self.assertRaisesRegex(launcher.OllamaExperimentError, "duplicates"):
+            launcher._parse_models(("qwen2.5:7b", "qwen2.5:7b"))
+        arguments = launcher.make_parser().parse_args(
+            ["--output-dir", "results/fixture", "--model", "qwen2.5:7b", "--model", "llama3.1:8b"]
+        )
+        self.assertEqual(arguments.models, ["qwen2.5:7b", "llama3.1:8b"])
+
+    def test_model_profile_freezes_name_digest_and_decoding(self) -> None:
+        profile = launcher._ollama_model_profile("Qwen/Example:7B", "a" * 64, max_tokens=321)
+        self.assertEqual(profile.model_id, "ollama-qwen-example-7b-aaaaaaaaaaaa")
+        self.assertEqual(profile.model_revision, "ollama-digest:" + "a" * 64)
+        self.assertEqual(profile.decoding["max_tokens"], 321)
+
     def test_default_mechanism_tasks_are_held_out_and_have_objective_trace_checks(self) -> None:
         tasks = JsonlTaskAdapter("ollama-mechanism", "v3").load(launcher.DEFAULT_TASKS)
         self.assertEqual(launcher.DEFAULT_TASKS.name, "ollama_durable_trace_tasks_v3.jsonl")

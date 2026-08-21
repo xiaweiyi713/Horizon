@@ -66,6 +66,19 @@ PYTHONPATH=python:. python3 experiments/ollama_durable_trace.py \
   --api-base-url http://127.0.0.1:11435/v1
 ```
 
+`--model` 可以重复指定；每个模型会先冻结自身的 Ollama digest，再与相同的条件、任务、
+prompt 和 seed 组成独立 manifest 行。例如：
+
+```bash
+PYTHONPATH=python:. python3 experiments/ollama_durable_trace.py \
+  --output-dir results/ollama-durable-trace/qwen-llama-seed17 \
+  --model qwen2.5:7b --model llama3.1:8b --seeds 17 \
+  --api-base-url http://127.0.0.1:11435/v1
+```
+
+该入口会按 matrix 顺序串行执行模型，避免两套权重争用单张 GPU 显存。它仍是机制 smoke，
+不是跨模型性能排行。
+
 输出目录必须是新目录或空目录，避免将不同运行混在一起。默认条件是
 `Horizon_anchor_off`、`Horizon_anchor_always` 与 `Horizon_runtime_heuristic`；它们的
 `anchor_strategy`、policy revision、模型 digest、prompt、seed 与 checkpoint cadence

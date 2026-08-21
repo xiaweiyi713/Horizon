@@ -6,9 +6,9 @@ Rust runtime → objective trace judge path, including frozen Anchor controls.
 It is an integration/mechanism smoke, not a public benchmark or a claim that
 Horizon improves a model.
 
-The model digest is read from Ollama before planning and is embedded in every
-manifest row.  The runner writes all generated artifacts below an empty output
-directory and never writes credentials to them.
+Each model digest is read from Ollama before planning and is embedded in its
+manifest profile. The runner writes all generated artifacts below an empty
+output directory and never writes credentials to them.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -51,6 +52,8 @@ DEFAULT_TASKS = ROOT / "experiments" / "ollama_durable_trace_tasks_v3.jsonl"
 DEFAULT_CONDITIONS = ROOT / "experiments" / "ollama_durable_trace_conditions_v1.json"
 DEFAULT_PROMPT = ROOT / "experiments" / "ollama_durable_trace_prompt_v2.txt"
 EXECUTOR_SPEC = "benchmarks.horizonbench.openai_compatible_trace_executor:execute"
+DEFAULT_MODELS = ("qwen2.5:7b",)
+_MODEL_SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
 class OllamaExperimentError(RuntimeError):
@@ -68,6 +71,38 @@ def _parse_seeds(value: str) -> list[int]:
     if len(set(seeds)) != len(seeds):
         raise OllamaExperimentError("--seeds must not contain duplicates")
     return seeds
+
+
+def _parse_models(values: Sequence[str] | None) -> list[str]:
+    """Validate a non-empty, de-duplicated sequence of installed Ollama tags."""
+
+    if values is None:
+        return list(DEFAULT_MODELS)
+    if isinstance(values, (str, bytes)):
+        raise OllamaExperimentError("--model must be repeated once per model, not supplied as one string sequence")
+    models: list[str] = []
+    for value in values:
+        if not isinstance(value, str) or not value.strip():
+            raise OllamaExperimentError("--model must be a non-empty model name")
+        models.append(value.strip())
+    if not models:
+        raise OllamaExperimentError("at least one --model is required")
+    if len(set(models)) != len(models):
+        raise OllamaExperimentError("--model must not contain duplicates")
+    return models
+
+
+def _ollama_model_profile(model_name: str, digest: str, *, max_tokens: int) -> ModelProfile:
+    """Create a unique immutable profile for one Ollama tag and installed digest."""
+
+    slug = _MODEL_SLUG_RE.sub("-", model_name.casefold()).strip("-") or "model"
+    return ModelProfile(
+        model_id="ollama-{}-{}".format(slug, digest[:12]),
+        provider="openai-compatible",
+        model=model_name,
+        model_revision="ollama-digest:{}".format(digest),
+        decoding={"temperature": 0, "top_p": 1, "max_tokens": max_tokens},
+    )
 
 
 def _ollama_root(api_base_url: str) -> str:
@@ -239,20 +274,21 @@ def run_experiment(arguments: argparse.Namespace) -> dict[str, Any]:
     prompt_path = arguments.prompt.resolve()
     if not tasks_path.is_file() or not prompt_path.is_file():
         raise OllamaExperimentError("task source and prompt must both be regular files")
-    digest = ollama_model_digest(arguments.api_base_url, arguments.model)
+    model_names = _parse_models(arguments.models)
+    model_digests = {
+        model_name: ollama_model_digest(arguments.api_base_url, model_name)
+        for model_name in model_names
+    }
     conditions = load_conditions(conditions_path)
     task_set = JsonlTaskAdapter(arguments.source_name, arguments.source_revision).load(
         tasks_path, split="heldout"
     )
-    model = ModelProfile(
-        model_id="ollama-{}-{}".format(arguments.model.replace(":", "-"), digest[:12]),
-        provider="openai-compatible",
-        model=arguments.model,
-        model_revision="ollama-digest:{}".format(digest),
-        decoding={"temperature": 0, "top_p": 1, "max_tokens": arguments.max_tokens},
-    )
+    models = [
+        _ollama_model_profile(model_name, model_digests[model_name], max_tokens=arguments.max_tokens)
+        for model_name in model_names
+    ]
     manifests = build_cross_model_matrix(
-        models=[model],
+        models=models,
         conditions=conditions,
         task_set=TaskSetIdentity.from_task_set(task_set),
         prompt=PromptArtifact(arguments.prompt_revision, prompt_path.read_text(encoding="utf-8")),
@@ -263,7 +299,6 @@ def run_experiment(arguments: argparse.Namespace) -> dict[str, Any]:
         metadata={
             "experiment_kind": "real_model_durable_trace_mechanism_smoke",
             "claim_boundary": "not_a_public_benchmark_or_model_improvement_claim",
-            "model_digest": digest,
         },
     )
     matrix_path = output_dir / "matrix.jsonl"
@@ -317,8 +352,11 @@ def run_experiment(arguments: argparse.Namespace) -> dict[str, Any]:
         "experiment_kind": "real_model_durable_trace_mechanism_smoke",
         "claim_boundary": "not_a_public_benchmark_or_model_improvement_claim",
         "output_dir": str(output_dir),
-        "model": arguments.model,
-        "model_digest": digest,
+        "models": [
+            {"model": model_name, "digest": model_digests[model_name]}
+            for model_name in model_names
+        ],
+        "model_count": len(models),
         "matrix_runs": len(manifests),
         "task_count": len(task_set.task_ids),
         "conditions": [condition.condition_id for condition in conditions],
@@ -335,7 +373,14 @@ def make_parser() -> argparse.ArgumentParser:
         description="Run a real-model Horizon durable-trace mechanism smoke against local Ollama"
     )
     parser.add_argument("--output-dir", type=Path, required=True, help="new or empty artifact directory")
-    parser.add_argument("--model", default="qwen2.5:7b", help="installed Ollama model name")
+    parser.add_argument(
+        "--model",
+        dest="models",
+        action="append",
+        default=None,
+        metavar="MODEL",
+        help="installed Ollama model name; repeat for a frozen multi-model matrix",
+    )
     parser.add_argument("--api-base-url", default="http://127.0.0.1:11434/v1")
     parser.add_argument(
         "--api-key",
