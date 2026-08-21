@@ -99,6 +99,25 @@ watch -n 1 /usr/lib/wsl/lib/nvidia-smi
 `agent reached max_steps`、策略调用失败和被拒绝的策略动作。它不是评分指标；真实模型
 响应、provider HTTP 正文、prompt、密钥或带凭据 URL 都不得写入此字段。
 
+### 生成可复核的中文报告
+
+新的 `ollama_durable_trace.py` 在一次完整运行结束时会自动写出根目录的 `report.md`。
+报告不会只信任汇总分数：它会重新读取并核对 `matrix.jsonl` 的自校验 manifest、静态
+preflight、每个 completed receipt、原始 `EpisodeResult` JSONL 与 `score.json`。任何任务集、
+模型 digest、运行 ID、结果文件、receipt 或重算分数不一致都会拒绝生成报告。
+
+历史工件或拷贝到另一台机器后的完整工件目录，也可以单独重建报告：
+
+```bash
+PYTHONPATH=python:. python3 experiments/render_ollama_durable_trace_report.py \
+  results/ollama-durable-trace/qwen-llama-seed17 \
+  --output results/ollama-durable-trace/qwen-llama-seed17/report.md
+```
+
+报告明确标注 mechanism-smoke 的研究边界，展示任务／prompt／runtime 身份、模型 digest、
+完整性检查和按模型 × 条件的观察值。诊断表只输出 allowlist 中的短运行类别；未识别的
+原始诊断文本会被抑制，避免意外泄露模型响应、provider 正文或凭据。
+
 ## Cross-domain workflow study
 
 For the cross-domain fixture or a compatible public source, retain its workflow

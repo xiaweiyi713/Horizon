@@ -84,6 +84,14 @@
 - No-network scripted-fixture CLI regression and `make bench-preflight`
   reproducibility entry point
 
+## v1.1 — implemented auditable local mechanism-smoke reporting
+
+- Deterministic Chinese Markdown renderer for complete local Ollama durable-trace artifacts
+- Cross-check of frozen manifests, static preflight, completed receipt bindings, raw episode JSONL,
+  and independently recomputed score output before a report can be emitted
+- Frozen model tags/digests, task/prompt/runtime identities, per-condition observations, and bounded
+  operational diagnostics without reproducing raw model/provider text
+
 ## Research execution
 
 - Configure task-environment executors for selected model backbones, add their

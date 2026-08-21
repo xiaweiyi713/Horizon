@@ -46,6 +46,11 @@ from benchmarks.horizonbench.protocol import (  # noqa: E402
 )
 from benchmarks.horizonbench.score_matrix import score_matrix  # noqa: E402
 from horizon_agent import HorizonApiError, HorizonClient  # noqa: E402
+from experiments.render_ollama_durable_trace_report import (  # noqa: E402
+    SmokeReportValidationError,
+    load_ollama_trace_artifacts,
+    render_ollama_trace_report,
+)
 
 
 DEFAULT_TASKS = ROOT / "experiments" / "ollama_durable_trace_tasks_v3.jsonl"
@@ -363,8 +368,15 @@ def run_experiment(arguments: argparse.Namespace) -> dict[str, Any]:
         "preflight": "preflight.json",
         "execution": "execution.json",
         "score": "score.json",
+        "report": "report.md",
     }
     _write_json(output_dir / "experiment.json", summary)
+    try:
+        artifacts = load_ollama_trace_artifacts(output_dir)
+        report = render_ollama_trace_report(artifacts)
+    except SmokeReportValidationError as error:
+        raise OllamaExperimentError("could not render auditable smoke report: {}".format(error)) from error
+    (output_dir / "report.md").write_text(report, encoding="utf-8")
     return summary
 
 
