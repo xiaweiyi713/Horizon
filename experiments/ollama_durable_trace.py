@@ -47,7 +47,7 @@ from benchmarks.horizonbench.score_matrix import score_matrix  # noqa: E402
 from horizon_agent import HorizonApiError, HorizonClient  # noqa: E402
 
 
-DEFAULT_TASKS = ROOT / "experiments" / "ollama_durable_trace_tasks_v2.jsonl"
+DEFAULT_TASKS = ROOT / "experiments" / "ollama_durable_trace_tasks_v3.jsonl"
 DEFAULT_CONDITIONS = ROOT / "experiments" / "ollama_durable_trace_conditions_v1.json"
 DEFAULT_PROMPT = ROOT / "experiments" / "ollama_durable_trace_prompt_v2.txt"
 EXECUTOR_SPEC = "benchmarks.horizonbench.openai_compatible_trace_executor:execute"
@@ -346,7 +346,7 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--conditions", type=Path, default=DEFAULT_CONDITIONS)
     parser.add_argument("--prompt", type=Path, default=DEFAULT_PROMPT)
     parser.add_argument("--source-name", default="horizon-ollama-durable-trace-mechanism")
-    parser.add_argument("--source-revision", default="v2")
+    parser.add_argument("--source-revision", default="v3")
     parser.add_argument("--prompt-revision", default="ollama-durable-trace-prompt-v2")
     parser.add_argument("--seeds", default="17", help="comma-separated unique integer seeds")
     parser.add_argument("--max-tokens", type=int, default=512)

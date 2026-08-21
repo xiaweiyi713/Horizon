@@ -31,12 +31,14 @@ JSONL and command-line contract.
 ## Windows GPU 上的真实模型机制 smoke
 
 `ollama_durable_trace.py` 是面向本地 Ollama 的可复现实验入口。默认任务集为
-`ollama_durable_trace_tasks_v2.jsonl`；它会先从 `/api/tags` 读取所选模型的不可变
+`ollama_durable_trace_tasks_v3.jsonl`；它会先从 `/api/tags` 读取所选模型的不可变
 digest，再冻结 model × condition × seed matrix，运行无副作用 preflight，启动独立的 Rust
 HTTP runtime，并保存 receipt、原始 EpisodeResult、评分和实验摘要。它使用模型可读的
 durable-trace mechanism suite 来验证
 真实模型到运行时的完整链路；该 suite 的 Approved plan 明确给出每一个持久化动作，因而
-它**不是**公共 benchmark，也不能用来声称 Horizon 改善了某个模型。
+它**不是**公共 benchmark，也不能用来声称 Horizon 改善了某个模型。早期 v2 任务集
+仍保留用于重放历史工件；v3 只将一条自然语言证据的句末标点从精确匹配范围中移除，
+避免把 tokenizer 表面差异误记为持久化机制失败。
 
 Windows / WSL 中先启动指向本地权重目录的 Ollama（示例使用现有的 Qwen2.5 7B）：
 

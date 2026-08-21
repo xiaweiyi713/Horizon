@@ -64,13 +64,19 @@ class OllamaDurableTraceLauncherTests(unittest.TestCase):
             launcher._parse_seeds("17,17")
 
     def test_default_mechanism_tasks_are_held_out_and_have_objective_trace_checks(self) -> None:
-        tasks = JsonlTaskAdapter("ollama-mechanism", "v2").load(launcher.DEFAULT_TASKS)
+        tasks = JsonlTaskAdapter("ollama-mechanism", "v3").load(launcher.DEFAULT_TASKS)
+        self.assertEqual(launcher.DEFAULT_TASKS.name, "ollama_durable_trace_tasks_v3.jsonl")
         self.assertEqual(
             tasks.task_ids,
             ("ollama-trace-evidence-01", "ollama-trace-failure-02", "ollama-trace-decision-03"),
         )
         self.assertTrue(
             all("horizon_trace_expectation" in task.metadata for task in tasks.tasks)
+        )
+        evidence_task = next(task for task in tasks.tasks if task.task_id == "ollama-trace-evidence-01")
+        self.assertEqual(
+            evidence_task.metadata["horizon_trace_expectation"]["required_evidence_terms"],
+            ("The verified checksum matches the durable prefix",),
         )
 
 
