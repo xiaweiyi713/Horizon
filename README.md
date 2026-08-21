@@ -106,7 +106,7 @@ and recovery boundaries. Python never mutates that projection directly.
 demos and tests use only the standard Python library.
 
 ```bash
-git clone <YOUR_REPOSITORY_URL> horizon
+git clone https://github.com/xiaweiyi713/Horizon.git horizon
 cd horizon
 
 make test
