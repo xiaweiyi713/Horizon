@@ -28,6 +28,57 @@ mixed task/prompt/runtime control rather than silently averaging incomparable
 runs. See [HorizonBench](../benchmarks/horizonbench/README.md) for the exact
 JSONL and command-line contract.
 
+## Windows GPU 上的真实模型机制 smoke
+
+`ollama_durable_trace.py` 是面向本地 Ollama 的可复现实验入口。它会先从
+`/api/tags` 读取所选模型的不可变 digest，再冻结 model × condition × seed matrix，
+运行无副作用 preflight，启动独立的 Rust HTTP runtime，并保存 receipt、原始
+EpisodeResult、评分和实验摘要。它使用 bundled durable-trace task fixture 来验证
+真实模型到运行时的完整链路，**不是**公共 benchmark，也不能用来声称 Horizon 改善了
+某个模型。
+
+Windows / WSL 中先启动指向本地权重目录的 Ollama（示例使用现有的 Qwen2.5 7B）：
+
+```bash
+tmux new-session -d -s horizon-ollama \
+  'env OLLAMA_MODELS=/mnt/d/FAR-models/ollama OLLAMA_HOST=127.0.0.1:11434 \
+  /mnt/d/FAR-runtime/ollama/bin/ollama serve'
+```
+
+推荐由 Mac 编排实验、Windows 仅承担 GPU 推理。这样无需在 Windows 额外安装 Rust
+toolchain，Horizon 的隔离 runtime 仍会在 Mac 上按冻结配置启动。Mac 上开一个 SSH
+本地端口转发：
+
+```bash
+ssh -f -N -o ExitOnForwardFailure=yes \
+  -L 127.0.0.1:11435:127.0.0.1:11434 windows-gpu
+```
+
+然后在 Mac 的 Horizon 仓库目录运行：
+
+```bash
+PYTHONPATH=python:. python3 experiments/ollama_durable_trace.py \
+  --output-dir results/ollama-durable-trace/qwen2.5-7b-seed17 \
+  --model qwen2.5:7b --seeds 17 \
+  --api-base-url http://127.0.0.1:11435/v1
+```
+
+输出目录必须是新目录或空目录，避免将不同运行混在一起。默认条件是
+`Horizon_anchor_off`、`Horizon_anchor_always` 与 `Horizon_runtime_heuristic`；它们的
+`anchor_strategy`、policy revision、模型 digest、prompt、seed 与 checkpoint cadence
+都会写入 manifest。运行时会停止其临时 Horizon server，但不会停止 `horizon-ollama`
+服务或 SSH 转发。启动前实验入口会拒绝 dirty Git worktree，避免将未提交代码错误标记为
+某个 commit 的实验结果。实验结束后可以在 Mac 用 `ps -ax | rg '127.0.0.1:11435'`
+找到对应 SSH 进程后再结束它。
+
+查看结果时先读取 `experiment.json`、`preflight.json` 和 `score.json`，并保留
+`matrix.jsonl`、`results/*.jsonl`、`*.receipt.json` 和 `horizon.db`。若要继续用 SSH
+观察 GPU：
+
+```bash
+watch -n 1 /usr/lib/wsl/lib/nvidia-smi
+```
+
 ## Cross-domain workflow study
 
 For the cross-domain fixture or a compatible public source, retain its workflow

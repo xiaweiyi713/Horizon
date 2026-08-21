@@ -40,7 +40,9 @@ def _context(
     return SimpleNamespace(
         task=task,
         manifest=SimpleNamespace(
-            condition=SimpleNamespace(configuration=condition or {}),
+            condition=SimpleNamespace(
+                configuration=condition or {}, policy_revision="fixture-policy-v1"
+            ),
             checkpoint_cadence=checkpoint_cadence,
             fault_schedule=fault_schedule or [],
             prompt=SimpleNamespace(text=prompt),
@@ -178,9 +180,16 @@ class BenchmarkAgentExecutorTests(unittest.TestCase):
 
     def test_condition_and_task_factories_reject_ambiguous_inputs(self) -> None:
         self.assertEqual(agent_config_from_condition(_context(condition={"semantic_memory_limit": 0})).semantic_memory_limit, 0)
+        fixed_control = agent_config_from_condition(
+            _context(condition={"agent": {"anchor_strategy": "always"}})
+        )
+        self.assertEqual(fixed_control.anchor_strategy, "always")
+        self.assertEqual(fixed_control.anchor_policy_revision, "fixture-policy-v1")
         self.assertEqual(initial_plan_from_task(_context(metadata={"initial_plan": []})), ())
         with self.assertRaisesRegex(BenchmarkExecutionError, "unrecognized"):
             agent_config_from_condition(_context(condition={"agent": {"unknown": 1}}))
+        with self.assertRaisesRegex(BenchmarkExecutionError, "anchor_strategy"):
+            agent_config_from_condition(_context(condition={"agent": {"anchor_strategy": 1}}))
         with self.assertRaisesRegex(BenchmarkExecutionError, "array of strings"):
             initial_plan_from_task(_context(metadata={"initial_plan": "one step"}))
         with self.assertRaisesRegex(BenchmarkExecutionError, "horizon_trace_expectation"):
@@ -219,6 +228,7 @@ class BenchmarkAgentExecutorTests(unittest.TestCase):
         self.assertEqual(report["initial_plan_steps"], 2)
         self.assertEqual(report["agent"]["checkpoint_every_steps"], 2)
         self.assertEqual(report["agent"]["max_steps"], 7)
+        self.assertEqual(report["agent"]["anchor_strategy"], "runtime_heuristic")
 
     def test_trace_judge_preflight_checks_immutable_expectation(self) -> None:
         context = _context(

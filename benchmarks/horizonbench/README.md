@@ -215,7 +215,12 @@ effective provider controls in `decoding`:
 The matrix's separate `seed` is forwarded to the provider; do not specify a
 different `decoding.seed`. Put simple agent controls under a condition's
 `configuration.agent`, for example
-`{"agent":{"max_steps":24,"semantic_memory_limit":4}}`.
+`{"agent":{"max_steps":24,"semantic_memory_limit":4}}`. To run an auditable
+State Anchor ablation, also set `anchor_strategy` to `runtime_heuristic`
+(default), `always`, or `disabled`. The fixed controls write durable
+`fixed_state_anchor_strategy` assessments; `always` additionally writes a
+`state_anchor_injected` event. Their immutable revision comes from the matrix
+condition's `policy_revision`.
 
 Start a separate benchmark runtime with automatic checkpoints disabled, so
 unconfigured runtime snapshots do not add checkpoint events; the bridge then

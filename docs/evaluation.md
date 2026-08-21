@@ -37,6 +37,34 @@ memory, checkpoint recovery, and structured cognitive state. Add `S` versus
 `S-off` on the same frozen model, prompts, and memory catalog to isolate the
 behavioral value and token cost of retrieval.
 
+### 可执行的 State Anchor 对照
+
+模型矩阵中的 `configuration.agent.anchor_strategy` 目前支持三种值：
+
+- `runtime_heuristic`：默认的 Horizon Rust 启发式策略；
+- `always`：每一个模型决策边界都注入 Rust 渲染的 State Anchor；
+- `disabled`：每一个边界都保留 compact context，但不注入 State Anchor。
+
+后两种不是仅修改 prompt 的隐式开关。Python 会将它们作为
+`fixed_state_anchor_strategy` assessment 提交给 Rust，运行时会持久化
+`state_decay_assessed`，而 `always` 还会持久化 `state_anchor_injected`。
+因此每一个控制条件的选择、当前 durable anchor distance 和冻结的
+`policy_revision` 都可以在事件流中审计。把策略写在 manifest 的
+`condition.configuration.agent` 中，例如：
+
+```json
+{
+  "condition_id": "Horizon_always_on_anchor",
+  "policy_revision": "fixed-anchor-control-v1",
+  "configuration": {
+    "agent": {"max_steps": 24, "semantic_memory_limit": 0, "anchor_strategy": "always"}
+  }
+}
+```
+
+固定策略与 `learned_intervention_policy` 不可混用；后者应由一个加载了冻结
+模型工件的专用 `agent_config_factory` 提供。
+
 ## Reproducibility record
 
 Every model-backed run should save:

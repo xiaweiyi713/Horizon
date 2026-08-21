@@ -54,6 +54,23 @@ duration, and metadata. Horizon intentionally records token/count metadata
 rather than the full prompt or response, keeping the audit trail useful without
 making it a second transcript store.
 
+## State Anchor 对照策略
+
+`AgentConfig.anchor_strategy` 默认为 `"runtime_heuristic"`，即由 Rust 的可解释
+启发式决定何时注入 Anchor。研究矩阵还可以使用两个固定且可审计的控制：
+
+```python
+AgentConfig(anchor_strategy="always", anchor_policy_revision="fixed-anchor-control-v1")
+AgentConfig(anchor_strategy="disabled", anchor_policy_revision="fixed-anchor-control-v1")
+```
+
+`always` 在每个模型决策边界注入 Rust 渲染的 Anchor，`disabled` 始终使用 compact
+context。两者都会通过 `apply_intervention` 写入 `state_decay_assessed`，而不是在
+Python 中悄悄改写 prompt；`always` 还会产生 `state_anchor_injected`。在
+HorizonBench 中，把 `anchor_strategy` 放进冻结的 `configuration.agent`，系统会使用
+该条件的 `policy_revision` 作为 assessment 版本。固定策略不能和
+`learned_intervention_policy` 同时配置。
+
 ## Manifest-bound HorizonBench episodes
 
 `DurableAgentEpisodeExecutor` is the model-backed bridge for a frozen

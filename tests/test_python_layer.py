@@ -66,6 +66,71 @@ class PythonLayerTests(unittest.TestCase):
         agent._checkpoint_if_due("run-cadence", 4, checkpointed=True)
         self.assertEqual(client.calls, ["run-cadence"])
 
+    def test_fixed_anchor_strategies_are_durable_and_auditable(self) -> None:
+        class FixedStrategyClient:
+            def __init__(self) -> None:
+                self.assessments = []
+                self.anchor_reads = 0
+
+            def apply_intervention(self, _run_id, assessment):
+                self.assessments.append(assessment)
+                events = [{"type": "state_decay_assessed", "data": {"assessment": assessment}}]
+                if assessment["action"] == "inject_anchor":
+                    events.append({"type": "state_anchor_injected", "data": {}})
+                return {"events": events}
+
+            def state_anchor(self, _run_id):
+                self.anchor_reads += 1
+                return {"content": "STATE ANCHOR\nPrimary Goal: preserve durable facts"}
+
+        projection = {
+            "sequence": 9,
+            "last_anchor_sequence": 2,
+            "state": "executing",
+            "cognitive": {
+                "primary_goal": "preserve durable facts",
+                "constraints": [{"content": "do not mutate the source"}],
+            },
+            "tasks": {},
+        }
+        disabled_client = FixedStrategyClient()
+        disabled = DurableAgent(
+            disabled_client,
+            ScriptedProvider([]),
+            config=AgentConfig(anchor_strategy="disabled", anchor_policy_revision="fixture-v1"),
+        )
+        context, kind, injected = disabled._context_for_boundary(
+            "run-disabled", projection, InterventionTracker()
+        )
+        self.assertFalse(injected)
+        self.assertEqual(kind, "disabled_compact_projection")
+        self.assertIn("Primary goal: preserve durable facts", context)
+        self.assertEqual(disabled_client.anchor_reads, 0)
+        self.assertEqual(disabled_client.assessments[0]["action"], "continue")
+        self.assertEqual(disabled_client.assessments[0]["signals"]["steps_since_anchor"], 7)
+        self.assertEqual(disabled_client.assessments[0]["metadata"]["anchor_strategy"], "disabled")
+
+        always_client = FixedStrategyClient()
+        always = DurableAgent(
+            always_client,
+            ScriptedProvider([]),
+            config=AgentConfig(anchor_strategy="always", anchor_policy_revision="fixture-v1"),
+        )
+        context, kind, injected = always._context_for_boundary(
+            "run-always", projection, InterventionTracker()
+        )
+        self.assertTrue(injected)
+        self.assertEqual(kind, "always_state_anchor")
+        self.assertIn("STATE ANCHOR", context)
+        self.assertEqual(always_client.anchor_reads, 1)
+        self.assertEqual(always_client.assessments[0]["action"], "inject_anchor")
+        self.assertEqual(always_client.assessments[0]["policy_version"], "fixture-v1")
+
+        with self.assertRaisesRegex(ValueError, "anchor_strategy"):
+            DurableAgent(
+                object(), ScriptedProvider([]), config=AgentConfig(anchor_strategy="periodic")
+            )
+
     def test_tracker_consumes_short_lived_risk_signals(self) -> None:
         tracker = InterventionTracker(context_budget_tokens=100, recovered_session=True)
         tracker.note_response(40, 20)

@@ -43,6 +43,7 @@ _RUNTIME_COMMANDS = frozenset(
     }
 )
 _TERMINAL_STATES = frozenset(("completed", "failed"))
+_ANCHOR_STRATEGIES = frozenset(("runtime_heuristic", "always", "disabled"))
 
 
 @dataclass
@@ -63,6 +64,13 @@ class AgentConfig:
     # heuristic so existing HTTP/native deployments retain their current
     # behavior until an experiment explicitly supplies a trained model.
     learned_intervention_policy: Optional[LearnedInterventionPolicy] = None
+    # The normal runtime-owned heuristic is the production default. The two
+    # fixed strategies are experiment controls that still use Rust's durable
+    # intervention boundary instead of becoming unaudited prompt switches.
+    anchor_strategy: str = "runtime_heuristic"
+    # Matrix-backed fixed controls inherit this from the frozen condition's
+    # policy revision. Direct callers may leave it unset.
+    anchor_policy_revision: Optional[str] = None
 
 
 @dataclass
@@ -112,6 +120,24 @@ def validate_agent_config(config: AgentConfig) -> None:
             raise ValueError("checkpoint_every_steps must be an integer or None")
         if config.checkpoint_every_steps < 1:
             raise ValueError("checkpoint_every_steps must be positive when supplied")
+    if not isinstance(config.anchor_strategy, str) or config.anchor_strategy not in _ANCHOR_STRATEGIES:
+        raise ValueError(
+            "anchor_strategy must be one of {}".format(
+                ", ".join(sorted(_ANCHOR_STRATEGIES))
+            )
+        )
+    if config.anchor_policy_revision is not None and (
+        not isinstance(config.anchor_policy_revision, str)
+        or not config.anchor_policy_revision.strip()
+    ):
+        raise ValueError("anchor_policy_revision must be a non-empty string or None")
+    if (
+        config.learned_intervention_policy is not None
+        and config.anchor_strategy != "runtime_heuristic"
+    ):
+        raise ValueError(
+            "learned_intervention_policy cannot be combined with a fixed anchor_strategy"
+        )
 
 
 class DurableAgent:
@@ -309,7 +335,7 @@ class DurableAgent:
         )
         policy_context = compact_context + semantic_context
         learned_policy = self.config.learned_intervention_policy
-        if learned_policy is None:
+        if learned_policy is None and self.config.anchor_strategy == "runtime_heuristic":
             intervention = self.client.intervene_if_needed(run_id, **tracker.consume_boundary())
             if intervention is not None:
                 context = self.client.state_anchor(run_id)["content"]
@@ -325,6 +351,15 @@ class DurableAgent:
                 policy_context,
                 "semantic_memory" if semantic_context else "compact_projection",
                 False,
+            )
+
+        if learned_policy is None:
+            return self._fixed_anchor_strategy_context(
+                run_id,
+                projection,
+                tracker,
+                policy_context,
+                semantic_context,
             )
 
         sequence = int(projection.get("sequence") or 0)
@@ -382,6 +417,72 @@ class DurableAgent:
         return (
             policy_context,
             "learned_semantic_memory" if semantic_context else "learned_compact_projection",
+            False,
+        )
+
+    def _fixed_anchor_strategy_context(
+        self,
+        run_id: str,
+        projection: Mapping[str, Any],
+        tracker: InterventionTracker,
+        policy_context: str,
+        semantic_context: str,
+    ) -> tuple[str, str, bool]:
+        """Apply an auditable fixed Anchor ablation at one durable boundary.
+
+        ``always`` and ``disabled`` submit a complete assessment to Rust
+        instead of merely changing the Python prompt. This makes their action,
+        durable anchor distance, and policy revision available to replay.
+        """
+
+        strategy = self.config.anchor_strategy
+        if strategy not in {"always", "disabled"}:  # Constructor validation is shared by all callers.
+            raise RuntimeError("fixed anchor strategy must be always or disabled")
+        sequence = int(projection.get("sequence") or 0)
+        last_anchor_sequence = int(projection.get("last_anchor_sequence") or 0)
+        signals = tracker.consume_boundary(
+            steps_since_anchor=max(0, sequence - last_anchor_sequence)
+        )
+        inject_anchor = strategy == "always"
+        assessment = {
+            "policy_id": "fixed_state_anchor_strategy",
+            "policy_version": self.config.anchor_policy_revision,
+            "risk_score_milli": 1000 if inject_anchor else 0,
+            "threshold_milli": 0 if inject_anchor else 1000,
+            "signals": signals,
+            "action": "inject_anchor" if inject_anchor else "continue",
+            "reason": (
+                "fixed always State Anchor control injects at every decision boundary"
+                if inject_anchor
+                else "fixed disabled State Anchor control keeps compact context at every decision boundary"
+            ),
+            "metadata": {
+                "controller": "fixed_state_anchor_strategy_v1",
+                "anchor_strategy": strategy,
+            },
+        }
+        outcome = self.client.apply_intervention(run_id, assessment)
+        events = outcome.get("events", ()) if isinstance(outcome, Mapping) else ()
+        injected_anchor = any(
+            isinstance(event, Mapping) and event.get("type") == "state_anchor_injected"
+            for event in events
+        )
+        if injected_anchor != inject_anchor:
+            raise RuntimeError("runtime intervention outcome disagreed with the fixed anchor strategy")
+        if injected_anchor:
+            anchor_context = str(self.client.state_anchor(run_id)["content"])
+            return (
+                "A fixed always-on State Anchor was injected. Use it as binding context:\n\n"
+                + anchor_context
+                + semantic_context,
+                "always_state_anchor_with_semantic_memory"
+                if semantic_context
+                else "always_state_anchor",
+                True,
+            )
+        return (
+            policy_context,
+            "disabled_semantic_memory" if semantic_context else "disabled_compact_projection",
             False,
         )
 

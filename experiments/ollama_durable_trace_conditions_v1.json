@@ -1,0 +1,37 @@
+{
+  "conditions": [
+    {
+      "condition_id": "Horizon_anchor_off",
+      "policy_revision": "fixed-anchor-control-v1",
+      "configuration": {
+        "agent": {
+          "max_steps": 6,
+          "semantic_memory_limit": 0,
+          "anchor_strategy": "disabled"
+        }
+      }
+    },
+    {
+      "condition_id": "Horizon_anchor_always",
+      "policy_revision": "fixed-anchor-control-v1",
+      "configuration": {
+        "agent": {
+          "max_steps": 6,
+          "semantic_memory_limit": 0,
+          "anchor_strategy": "always"
+        }
+      }
+    },
+    {
+      "condition_id": "Horizon_runtime_heuristic",
+      "policy_revision": "rust-state-anchor-heuristic-v1",
+      "configuration": {
+        "agent": {
+          "max_steps": 6,
+          "semantic_memory_limit": 0,
+          "anchor_strategy": "runtime_heuristic"
+        }
+      }
+    }
+  ]
+}

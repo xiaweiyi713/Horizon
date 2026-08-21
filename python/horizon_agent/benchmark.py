@@ -87,6 +87,7 @@ def agent_config_from_condition(context: Any) -> AgentConfig:
                 "wall_time_budget_ms",
                 "checkpoint_on_finish",
                 "semantic_memory_limit",
+                "anchor_strategy",
             )
             if key in configuration
         }
@@ -100,6 +101,7 @@ def agent_config_from_condition(context: Any) -> AgentConfig:
         "wall_time_budget_ms",
         "checkpoint_on_finish",
         "semantic_memory_limit",
+        "anchor_strategy",
     }
     unknown = sorted(set(raw) - allowed)
     if unknown:
@@ -126,6 +128,18 @@ def agent_config_from_condition(context: Any) -> AgentConfig:
         if not isinstance(value, bool):
             raise BenchmarkExecutionError("condition configuration.agent.checkpoint_on_finish must be boolean")
         values["checkpoint_on_finish"] = value
+    if "anchor_strategy" in raw:
+        value = raw["anchor_strategy"]
+        if not isinstance(value, str):
+            raise BenchmarkExecutionError("condition configuration.agent.anchor_strategy must be a string")
+        values["anchor_strategy"] = value
+        if value != "runtime_heuristic":
+            policy_revision = getattr(condition, "policy_revision", None)
+            if not isinstance(policy_revision, str) or not policy_revision.strip():
+                raise BenchmarkExecutionError(
+                    "fixed anchor_strategy requires a non-empty manifest.condition.policy_revision"
+                )
+            values["anchor_policy_revision"] = policy_revision
     try:
         return AgentConfig(**values)
     except ValueError as error:
@@ -239,6 +253,8 @@ class DurableAgentEpisodeExecutor:
                 "checkpoint_every_steps": config.checkpoint_every_steps,
                 "semantic_memory_limit": config.semantic_memory_limit,
                 "learned_intervention_policy_configured": config.learned_intervention_policy is not None,
+                "anchor_strategy": config.anchor_strategy,
+                "anchor_policy_revision": config.anchor_policy_revision,
             },
         }
 
