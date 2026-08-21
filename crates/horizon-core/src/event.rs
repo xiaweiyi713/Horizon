@@ -200,7 +200,7 @@ impl CognitiveState {
             "Constraints",
             self.constraints.iter().map(|item| item.content.clone()),
         );
-        section(&mut lines, "Current Plan", self.current_plan.iter().cloned());
+        section(&mut lines, "Approved plan", self.current_plan.iter().cloned());
         // Keep the same bounded progress facts available in full Anchors and
         // compact Python context. A policy can therefore evaluate a plan step
         // such as "if evidence=0" without inferring counts from repeated prose.
@@ -452,6 +452,7 @@ mod tests {
 
         let anchor = state.render_anchor();
         let counts = "Durable records: decisions=1, evidence=1, remembered failures=1";
+        assert!(anchor.contains("Approved plan:\n- Persist each required durable record once."));
         assert!(anchor.contains(counts));
         let counts_index = anchor.find(counts).expect("Anchor should include record counts");
         let decisions_index = anchor
