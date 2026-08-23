@@ -146,7 +146,10 @@ PYTHONPATH=python:. python3 benchmarks/horizonbench/preflight_matrix.py \
 随后用相同 matrix／task 参数调用 `execute_matrix.py`，并保留结果 JSONL、receipt、
 runtime 数据库／事件与 `HORIZON_BENCH_ARTIFACT_ROOT`。详细 schema 与完整命令见
 [HorizonBench 的 artifact workspace 协议](../benchmarks/horizonbench/README.md#objective-artifact-workspace-execution)。
-这是受限 verifier 环境而非通用 shell/Docker sandbox；当前也会拒绝非空 fault schedule。
+这是受限 verifier 环境而非通用 shell/Docker sandbox。它可执行一个冻结的
+`policy_restart` 以验证 Python 策略工作者恢复；Rust runtime 崩溃或其他非空 fault schedule
+仍需专用环境执行。使用该重启 schedule 的 prompt 必须说明
+`verified artifact workspace result`，以便模型依据安全的 durable 验证摘要结束任务。
 
 ## Cross-domain workflow study
 

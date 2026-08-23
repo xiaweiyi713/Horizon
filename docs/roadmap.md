@@ -103,7 +103,7 @@
 - Objective judge requiring a completed durable run, retained goal/constraint, a real adapter
   invocation, a durable verified terminal result, and an independently verified artifact
 - Static OpenAI-compatible preflight plus no-network real-Rust-runtime integration coverage via
-  `make bench-artifact-workspace`; non-empty fault schedules remain explicitly unsupported
+  `make bench-artifact-workspace`
 
 ## v1.3 — implemented model-readable artifact task inputs
 
@@ -116,8 +116,21 @@
 - Fixture tasks upgraded to require read → transform → write → objectively verify, plus a
   regression for finishing exactly on the configured maximum decision step
 
+## v1.4 — implemented policy-worker restart recovery for artifact tasks
+
+- Strictly parsed `fault_schedule` support for exactly one bounded
+  `policy_restart` after a declared positive number of model calls; arbitrary faults remain rejected
+- Reconstructs the Python-owned client/provider/workspace/adapter boundary and resumes the same
+  Rust run with durable compact context, while explicitly not claiming a runtime-server crash test
+- Resumed `DurableAgent` instances allocate fresh LLM audit operation IDs from durable prior results
+- After a restart-triggering policy failure, compact context retains a safe verified-artifact summary
+  so the model can finish without seeing or rewriting candidate contents
+- Held-out real-HTTP-runtime fixture proves read → write/verify → policy restart → finish without a
+  second verified artifact write, and reports recovery metrics in the objective episode result
+
 ## Research execution
 
 - Freeze selected model backbones and held-out artifact tasks, run the objective
   workspace executor across seeds/conditions, and publish the resulting technical report.
-  Public domain tasks and fault schedules still require their own environment-specific judge.
+  Public domain tasks, Rust runtime crashes, and fault schedules other than `policy_restart` still
+  require their own environment-specific judge.

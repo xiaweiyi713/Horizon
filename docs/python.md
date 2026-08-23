@@ -186,6 +186,19 @@ immutable template、可写相对路径白名单和一个精确的文本／JSON 
 schema、静态 preflight 和真实模型执行命令见
 [HorizonBench](../benchmarks/horizonbench/README.md#objective-artifact-workspace-execution)。
 
+artifact executor 还可以执行一个严格、冻结的策略工作者重启 fault schedule：
+
+```json
+[{"kind":"policy_restart","after_model_calls":2}]
+```
+
+`after_model_calls` 必须为正数且小于 `agent.max_steps`。该故障在下一次模型调用前中断，随后
+重新创建 Python 的 client／provider／workspace／adapter，并以
+`run_existing(..., recovered_session=True)` 继续同一个 Rust run。它验证的是 Python 策略层从 durable state 恢复，
+**不是** Rust runtime 服务器崩溃测试；其他 fault schedule 仍会在 preflight 阶段被拒绝。
+使用该 schedule 的冻结 prompt 还必须提到 `verified artifact workspace result`：运行时只会重新呈现
+已验证状态、adapter 名和稳定操作 ID，不会呈现候选工件内容。
+
 ## Optional native runtime
 
 The default client remains HTTP. For an in-process local SQLite runtime, build

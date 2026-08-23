@@ -2,7 +2,7 @@
 
 > 面向长时程 AI Agent 的持久化认知运行时：Python 负责策略智能，Rust 负责可靠性。
 
-**项目状态：** v1.3 工程里程碑已完成。Horizon 提供经过测试、可复现的运行时与评估基础；在没有冻结模型、任务与客观环境实验之前，项目**不会**宣称自己带来了真实模型性能提升。
+**项目状态：** v1.4 工程里程碑已完成。Horizon 提供经过测试、可复现的运行时与评估基础；在没有冻结模型、任务与客观环境实验之前，项目**不会**宣称自己带来了真实模型性能提升。
 
 长上下文并不等于长时程可靠性。Agent 仍可能遗忘目标、违反早期约束、重复已经失败的方法，或在崩溃后以不一致的进度继续执行。Horizon 将这个问题定义为**持久化执行状态管理**：
 
@@ -71,6 +71,7 @@ Python 策略 / LLM Provider
 - 冻结的模型 × 条件 × 随机种子 manifest、按任务原子持久化的 result receipt、可恢复矩阵执行与客观 trace judge。
 - 不执行任务的 matrix preflight：在调用模型或运行时之前，校验任务身份、冻结的 prompt / condition / decoding 控制、凭据是否存在与 trace expectation。
 - 受限的 artifact workspace 任务环境：模型经由已注册的 adapter 读取任务拥有的 immutable input，并只写入白名单文件；精确文本／JSON verifier 独立判定结果。读到的内容以受限、标记为不可信的 durable tool context 供恢复后复用，写操作 receipt 则让稳定操作 ID 在 Python 重启后不重复改写已完成工件。
+- artifact 评估可受控注入一次 `policy_restart`：重建 Python 策略工作者并从同一个 Rust durable run 恢复，保留安全的已验证工件摘要；这不等同于 Rust runtime 崩溃测试。
 
 ## 快速开始：无需 API Key
 
@@ -158,7 +159,7 @@ python3 benchmarks/horizonbench/execute_matrix.py --help
 python3 benchmarks/horizonbench/score_matrix.py --help
 ```
 
-`preflight_matrix.py` 会拒绝没有静态 `execute.preflight(context)` hook 的执行器。内置 durable-trace preflight 会验证 Provider 配置和凭据存在性，但不会记录任何敏感值。对于只需受限文件产物的任务，可使用 `openai_compatible_artifact_workspace_executor`：它要求显式配置 `HORIZON_BENCH_ARTIFACT_ROOT`，并由任务拥有的精确 verifier 判定结果。该环境不执行 shell，也不是通用安全沙箱；公共 domain 任务和非空 fault schedule 仍需要能真正注入并客观评判这些事件的专用环境。
+`preflight_matrix.py` 会拒绝没有静态 `execute.preflight(context)` hook 的执行器。内置 durable-trace preflight 会验证 Provider 配置和凭据存在性，但不会记录任何敏感值。对于只需受限文件产物的任务，可使用 `openai_compatible_artifact_workspace_executor`：它要求显式配置 `HORIZON_BENCH_ARTIFACT_ROOT`，并由任务拥有的精确 verifier 判定结果。该环境不执行 shell，也不是通用安全沙箱；它仅能受控注入一次 Python 策略工作者 `policy_restart`，公共 domain、Rust runtime 崩溃和其他 fault schedule 仍需要能真正注入并客观评判这些事件的专用环境。
 
 在报告结果前，请阅读完整的 [HorizonBench 协议](benchmarks/horizonbench/README.md)、[评估指南](docs/evaluation.md) 和 [路线图](docs/roadmap.md)。
 

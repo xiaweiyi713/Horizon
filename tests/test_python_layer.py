@@ -66,6 +66,19 @@ class PythonLayerTests(unittest.TestCase):
         agent._checkpoint_if_due("run-cadence", 4, checkpointed=True)
         self.assertEqual(client.calls, ["run-cadence"])
 
+    def test_recovered_agent_allocates_new_llm_operation_ids_from_durable_results(self) -> None:
+        projection = {
+            "tool_results": [
+                {"tool": "llm_policy", "operation_id": "llm:run-recovered:1"},
+                {"tool": "llm_policy", "operation_id": "llm:run-recovered:3"},
+                {"tool": "other_tool", "operation_id": "llm:run-recovered:99"},
+                {"tool": "llm_policy", "operation_id": "llm:another-run:12"},
+                {"tool": "llm_policy", "operation_id": "llm:run-recovered:not-a-number"},
+            ]
+        }
+        self.assertEqual(DurableAgent._next_llm_policy_step(projection, "run-recovered"), 4)
+        self.assertEqual(DurableAgent._next_llm_policy_step({}, "run-recovered"), 1)
+
     def test_fixed_anchor_strategies_are_durable_and_auditable(self) -> None:
         class FixedStrategyClient:
             def __init__(self) -> None:
@@ -448,12 +461,27 @@ class PythonLayerTests(unittest.TestCase):
                         "tool": "artifact_workspace",
                         "status": "succeeded",
                         "operation_id": "artifact:task-1:write",
-                        "output": {"raw": "do not put this in compact context"},
+                        "output": {
+                            "verified": True,
+                            "raw": "do not put this in compact context",
+                        },
+                        "metadata": {"environment": "artifact_workspace_v1"},
+                    },
+                    {
+                        "tool": "llm_policy",
+                        "status": "failed",
+                        "operation_id": "llm:run:3",
+                        "error": "injected restart",
                     }
                 ],
             }
         )
-        self.assertIn("artifact_workspace [succeeded] (operation artifact:task-1:write)", compact)
+        self.assertIn("llm_policy [failed] (operation llm:run:3)", compact)
+        self.assertIn(
+            "Latest verified artifact workspace result: artifact_workspace [succeeded, verified] "
+            "(operation artifact:task-1:write)",
+            compact,
+        )
         self.assertIn("untrusted task input", compact)
         self.assertIn("release=durable-v1", compact)
         self.assertNotIn("do not put this", compact)

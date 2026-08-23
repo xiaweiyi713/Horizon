@@ -23,6 +23,7 @@ from .artifact_workspace_support import artifact_root, workspace_factory
 
 _DEFAULT_RUNTIME_URL = "http://127.0.0.1:8787"
 _FIXTURE_ACTIONS_KEY = "fixture_actions"
+_FIXTURE_RECOVERY_ACTIONS_KEY = "fixture_recovery_actions"
 
 
 def _configured_runtime_url() -> str:
@@ -36,15 +37,16 @@ def _runtime_client(_context: Any) -> HorizonClient:
     return HorizonClient(_configured_runtime_url())
 
 
-def _fixture_actions(context: Any) -> list[dict[str, Any]]:
+def _fixture_actions(context: Any, *, recovery: bool = False) -> list[dict[str, Any]]:
     task = getattr(context, "task", None)
     metadata = getattr(task, "metadata", None)
     if not isinstance(metadata, Mapping):
         raise BenchmarkExecutionError("benchmark task metadata must be an object")
-    raw = metadata.get(_FIXTURE_ACTIONS_KEY)
+    key = _FIXTURE_RECOVERY_ACTIONS_KEY if recovery else _FIXTURE_ACTIONS_KEY
+    raw = metadata.get(key)
     if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence) or not raw:
         raise BenchmarkExecutionError(
-            "benchmark task metadata.fixture_actions must be a non-empty array of action objects"
+            "benchmark task metadata.{} must be a non-empty array of action objects".format(key)
         )
     actions: list[dict[str, Any]] = []
     for index, action in enumerate(raw, 1):
@@ -82,9 +84,14 @@ def _provider(context: Any) -> ScriptedProvider:
     return ScriptedProvider(_fixture_actions(context))
 
 
+def _recovery_provider(context: Any) -> ScriptedProvider:
+    return ScriptedProvider(_fixture_actions(context, recovery=True))
+
+
 _EXECUTOR = DurableArtifactWorkspaceExecutor(
     client_factory=_runtime_client,
     provider_factory=_provider,
+    recovery_provider_factory=_recovery_provider,
     workspace_factory=workspace_factory,
 )
 
@@ -100,6 +107,9 @@ def preflight(context: Any) -> dict[str, Any]:
 
     report = _EXECUTOR.preflight(context)
     actions = _fixture_actions(context)
+    recovery_actions = (
+        _fixture_actions(context, recovery=True) if report["fault_plan"] is not None else []
+    )
     runtime_url = _configured_runtime_url()
     artifact_root()
     return {
@@ -109,6 +119,7 @@ def preflight(context: Any) -> dict[str, Any]:
         "runtime_url_configured": bool(runtime_url),
         "artifact_root_configured": True,
         "fixture_action_count": len(actions),
+        "fixture_recovery_action_count": len(recovery_actions),
     }
 
 

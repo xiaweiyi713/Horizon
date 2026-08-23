@@ -7,7 +7,12 @@ state-machine or persistence logic in Python.
 
 from .agent import AgentConfig, DurableAgent, RunResult
 from .adapters import AdapterError, AdapterRegistry, AdapterRequest, AdapterResult, FunctionAdapter
-from .artifact_benchmark import ArtifactWorkspaceJudge, DurableArtifactWorkspaceExecutor, workspace_from_root
+from .artifact_benchmark import (
+    ArtifactPolicyRestart,
+    ArtifactWorkspaceJudge,
+    DurableArtifactWorkspaceExecutor,
+    workspace_from_root,
+)
 from .artifact_workspace import (
     ARTIFACT_WORKSPACE_METADATA_KEY,
     ARTIFACT_WORKSPACE_MODEL_CONTEXT_KIND,
@@ -46,6 +51,7 @@ __all__ = [
     "ARTIFACT_WORKSPACE_MODEL_CONTEXT_KIND",
     "ARTIFACT_WORKSPACE_SCHEMA_VERSION",
     "ArtifactObservation",
+    "ArtifactPolicyRestart",
     "ArtifactVerifier",
     "ArtifactWorkspace",
     "ArtifactWorkspaceAdapter",

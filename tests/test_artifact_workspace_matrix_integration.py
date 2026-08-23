@@ -36,6 +36,7 @@ from horizon_agent import HorizonApiError, HorizonClient  # noqa: E402
 
 FIXTURES = ROOT / "benchmarks" / "horizonbench" / "fixtures"
 TASKS = FIXTURES / "artifact_workspace_tasks.jsonl"
+RECOVERY_TASKS = FIXTURES / "artifact_workspace_recovery_tasks.jsonl"
 MODELS = FIXTURES / "artifact_workspace_models.json"
 CONDITIONS = FIXTURES / "artifact_workspace_conditions.json"
 PROMPT = FIXTURES / "artifact_workspace_prompt.txt"
@@ -220,6 +221,110 @@ class ArtifactWorkspaceMatrixIntegrationTests(unittest.TestCase):
                     for context in read_contexts
                 )
             )
+
+    def test_scripted_fixture_recovers_a_policy_worker_restart_without_rewriting_artifact(self) -> None:
+        model = ModelProfile.from_mapping(json.loads(MODELS.read_text(encoding="utf-8"))["models"][0])
+        condition = EvaluationCondition.from_mapping(
+            json.loads(CONDITIONS.read_text(encoding="utf-8"))["conditions"][0]
+        )
+        task_set = JsonlTaskAdapter(
+            "horizon-artifact-workspace-recovery-fixture", "fixture-v1"
+        ).load(RECOVERY_TASKS)
+        fault_schedule = [{"kind": "policy_restart", "after_model_calls": 2}]
+        manifests = build_cross_model_matrix(
+            models=[model],
+            conditions=[condition],
+            task_set=TaskSetIdentity.from_task_set(task_set),
+            prompt=PromptArtifact("artifact-workspace-fixture-v1", PROMPT.read_text(encoding="utf-8")),
+            seeds=[11],
+            runtime_revision="fixture-v1",
+            checkpoint_cadence=1,
+            fault_schedule=fault_schedule,
+        )
+
+        with tempfile.TemporaryDirectory(prefix="horizon-artifact-recovery-matrix-") as temporary:
+            directory = Path(temporary)
+            matrix = directory / "matrix.jsonl"
+            workspace_root = directory / "workspaces"
+            write_manifest_jsonl(matrix, manifests)
+            executor = load_executor(EXECUTOR_SPEC)
+            address = _free_address()
+            server = _start_server(_horizon_binary(), directory / "horizon.db", address)
+            try:
+                with patch.dict(
+                    os.environ,
+                    {
+                        "HORIZON_BENCH_RUNTIME_URL": "http://" + address,
+                        "HORIZON_BENCH_ARTIFACT_ROOT": str(workspace_root),
+                    },
+                    clear=False,
+                ):
+                    preflight = preflight_matrix(
+                        matrix,
+                        tasks_path=RECOVERY_TASKS,
+                        source_name="horizon-artifact-workspace-recovery-fixture",
+                        source_revision="fixture-v1",
+                        split="heldout",
+                        executor=executor,
+                        executor_spec=EXECUTOR_SPEC,
+                    )
+                    execution = execute_matrix(
+                        matrix,
+                        tasks_path=RECOVERY_TASKS,
+                        source_name="horizon-artifact-workspace-recovery-fixture",
+                        source_revision="fixture-v1",
+                        split="heldout",
+                        executor=executor,
+                        executor_spec=EXECUTOR_SPEC,
+                        results_dir=directory / "results",
+                    )
+                results = read_jsonl(directory / "results" / (manifests[0].run_id + ".jsonl"))
+                client = HorizonClient("http://" + address)
+                trace = client.events(str(client.list_runs()[0]["run_id"]))
+            finally:
+                _stop_server(server)
+
+            self.assertEqual(preflight["runs"][0]["checks"][0]["preflight"]["fault_plan"], fault_schedule[0])
+            self.assertEqual(
+                preflight["runs"][0]["checks"][0]["preflight"]["fixture_recovery_action_count"], 1
+            )
+            self.assertEqual(execution["runs"][0]["status"], "completed")
+            self.assertEqual(len(results), 1)
+            self.assertTrue(results[0].success)
+            self.assertTrue(results[0].recovery_attempted)
+            self.assertTrue(results[0].recovery_succeeded)
+            self.assertEqual(results[0].recovery_distance, 1)
+            self.assertEqual(score_results(results).recovery_success_rate, 1.0)
+
+            tool_results = [
+                event["data"]["result"]
+                for event in trace
+                if event["type"] == "tool_result_recorded"
+            ]
+            self.assertTrue(
+                any(
+                    result["tool"] == "llm_policy"
+                    and result["status"] == "failed"
+                    and result["error"] == "artifact workspace injected policy restart"
+                    for result in tool_results
+                )
+            )
+            llm_operation_ids = [
+                result["operation_id"] for result in tool_results if result["tool"] == "llm_policy"
+            ]
+            self.assertEqual(llm_operation_ids, sorted(set(llm_operation_ids)))
+            self.assertEqual(
+                sorted(int(operation_id.rsplit(":", 1)[1]) for operation_id in llm_operation_ids),
+                [1, 2, 3, 4],
+            )
+            verified_writes = [
+                result
+                for result in tool_results
+                if result["tool"] == "artifact_workspace"
+                and result["status"] == "succeeded"
+                and result["output"].get("verified") is True
+            ]
+            self.assertEqual(len(verified_writes), 1)
 
 
 if __name__ == "__main__":

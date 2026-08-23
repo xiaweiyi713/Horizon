@@ -145,10 +145,14 @@ preflight parses the artifact-root configuration without creating it. The v1
 environment has no shell or arbitrary-file capability: it can only read
 immutable template inputs and write declared paths. Read data is bounded,
 durably replayable, and explicitly labeled as untrusted task input in the
-policy context; preflight requires that prompt boundary. It rejects non-empty
-fault schedules and remains a reproducible verifier boundary, not a general
-sandbox. `make bench-artifact-workspace` covers the full scripted no-network
-path.
+policy context; preflight requires that prompt boundary. It can enact only one
+strict `{"kind":"policy_restart","after_model_calls":N}` schedule, which
+reconstructs the Python policy worker after N durable model boundaries without
+restarting the Rust runtime. All other fault schedules are rejected. It remains
+a reproducible verifier boundary, not a general sandbox. `make bench-artifact-workspace`
+covers the normal and policy-restart scripted no-network paths. After restart,
+the model receives only a safe verified-artifact status/operation-ID summary,
+not candidate contents.
 
 ## Cross-domain long-horizon workflow protocol
 

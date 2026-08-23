@@ -128,6 +128,16 @@ context as explicitly untrusted task data while all other external tool output
 remains hidden. It is an exact artifact-verification primitive, not a general
 filesystem or process sandbox.
 
+For objective artifact experiments, the task executor can enact exactly one
+frozen `policy_restart` after a declared number of model calls. It deliberately
+reconstructs the Python provider/client/workspace/adapter boundary and calls
+`run_existing(..., recovered_session=True)` against the same Rust run; durable
+LLM policy operation IDs continue from the prior terminal result. This is a
+policy-worker recovery control, not a substitute for crashing or recovering the
+Rust runtime process itself. If a later failed policy result would otherwise
+hide a prior verified artifact result, compact context retains only a safe
+verified-status/operation-ID summary, never candidate artifact contents.
+
 ## Learned intervention boundary
 
 `horizon_agent.memory` can train a small offline logistic state-decay predictor

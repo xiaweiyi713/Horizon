@@ -347,8 +347,21 @@ content is intentionally retained in its durable tool result so replay can
 show the policy the same bounded task input; therefore template files must be
 appropriate for the model and audit artifact. This is still at-least-once
 delivery around the write boundary: a crash between the write and receipt may
-cause one safe replay, and a non-empty matrix `fault_schedule` is rejected
-until a task environment can genuinely enact and observe it.
+cause one safe replay. The executor can additionally enact exactly one frozen
+policy-worker restart schedule:
+
+```json
+[{"kind":"policy_restart","after_model_calls":2}]
+```
+
+It interrupts immediately before the next model call, rebuilds the Python
+client/provider/workspace/adapter boundary, and resumes the same durable Rust
+run. The resulting episode records recovery metrics and requires a durable
+failed policy boundary as audit evidence. This is **not** a Rust runtime-server
+crash simulation; any other schedule is rejected until a task environment can
+genuinely enact and observe it. A frozen prompt using this schedule must name
+the `Latest verified artifact workspace result` summary: it is a safe durable
+verification signal after restart and contains no candidate-artifact content.
 
 This is intentionally a restricted artifact verifier, **not** a complete
 process/container security sandbox. It runs no shell command and provides no

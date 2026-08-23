@@ -3,8 +3,9 @@
 The selected model interacts with a task-owned workspace only through
 ``invoke_adapter``.  A successful model self-report is insufficient: the
 workspace must contain the verified artifact and the adapter must have recorded
-its durable terminal result.  This executor supports no fault schedule yet;
-fault/restart tasks need an environment that can enact those boundaries.
+its durable terminal result.  It can enact the bounded ``policy_restart``
+schedule defined by ``DurableArtifactWorkspaceExecutor``; runtime-server crash
+tasks still need their own environment-specific executor.
 """
 
 from __future__ import annotations
