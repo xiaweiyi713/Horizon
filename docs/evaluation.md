@@ -142,9 +142,13 @@ For a bounded artifact task, use
 verified text/JSON artifact and a real durable adapter result, so a model's
 `finish` or forged `record_tool_result` cannot establish success. Static
 preflight parses the artifact-root configuration without creating it. The v1
-environment has no shell or arbitrary-file capability and rejects non-empty
-fault schedules; it is a reproducible verifier boundary, not a general sandbox.
-`make bench-artifact-workspace` covers the full scripted no-network path.
+environment has no shell or arbitrary-file capability: it can only read
+immutable template inputs and write declared paths. Read data is bounded,
+durably replayable, and explicitly labeled as untrusted task input in the
+policy context; preflight requires that prompt boundary. It rejects non-empty
+fault schedules and remains a reproducible verifier boundary, not a general
+sandbox. `make bench-artifact-workspace` covers the full scripted no-network
+path.
 
 ## Cross-domain long-horizon workflow protocol
 

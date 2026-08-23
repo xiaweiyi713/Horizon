@@ -3,9 +3,10 @@
 The environment deliberately does not execute a shell command or accept an
 arbitrary filesystem path from a model.  A task owns an immutable template,
 an allowlist of writable relative paths, and one exact text/JSON verifier.
-The policy can submit candidate file contents only through
-``ArtifactWorkspaceAdapter``; :class:`~horizon_agent.AdapterRegistry` records
-the invocation and terminal verification outcome around that side effect.
+The policy can read declared immutable template files and submit candidate file
+contents only through ``ArtifactWorkspaceAdapter``;
+:class:`~horizon_agent.AdapterRegistry` records each input read and terminal
+verification outcome around the task-environment boundary.
 
 This is a small task-environment primitive, not a general sandbox.  It gives
 HorizonBench artifact tasks an objective, reproducible success boundary before
@@ -29,6 +30,7 @@ from .adapters import AdapterRequest, AdapterResult
 
 ARTIFACT_WORKSPACE_METADATA_KEY = "horizon_artifact_workspace_v1"
 ARTIFACT_WORKSPACE_SCHEMA_VERSION = 1
+ARTIFACT_WORKSPACE_MODEL_CONTEXT_KIND = "artifact_workspace_read_v1"
 _WORKSPACE_MARKER = ".horizon-artifact-workspace.json"
 _WORKSPACE_OPERATIONS = ".horizon-artifact-operations.json"
 _OPERATION_RECEIPT_SCHEMA_VERSION = 1
@@ -38,6 +40,8 @@ _MAX_FILE_BYTES = 16 * 1024
 _MAX_TEMPLATE_BYTES = 128 * 1024
 _MAX_OPERATION_RECEIPTS = 64
 _MAX_OPERATION_ID_BYTES = 256
+_MAX_READ_FILES = 4
+_MAX_MODEL_CONTEXT_BYTES = 32 * 1024
 _ADAPTER_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _OBSERVATION_REASONS = frozenset(
@@ -302,6 +306,7 @@ class ArtifactWorkspaceSpec:
             "spec_sha256": self.sha256,
             "adapter_name": self.adapter_name,
             "template_file_count": len(self.template_files),
+            "readable_template_paths": [item.path for item in self.template_files],
             "writable_paths": list(self.writable_paths),
             "verifier_kind": self.verifier.kind,
             "verifier_path": self.verifier.path,
@@ -634,6 +639,48 @@ class ArtifactWorkspace:
             self._write_text(path, content)
         return self.verify(written_paths=tuple(paths))
 
+    def read_template_files(self, paths: Sequence[str]) -> tuple[WorkspaceTemplateFile, ...]:
+        """Return bounded, immutable task inputs for a model-facing read action.
+
+        Only task-declared template files can be read.  Their current bytes
+        must still match the immutable specification, so an external mutation
+        cannot quietly become model-visible task input.
+        """
+
+        if isinstance(paths, (str, bytes, bytearray)) or not isinstance(paths, Sequence):
+            raise ArtifactWorkspaceError("adapter input.paths must be an array")
+        if not paths or len(paths) > _MAX_READ_FILES:
+            raise ArtifactWorkspaceError(
+                "adapter input.paths must contain 1 to {} paths".format(_MAX_READ_FILES)
+            )
+        templates = {item.path: item for item in self.spec.template_files}
+        requested = tuple(
+            _relative_path(path, "adapter input.paths[{}]".format(index))
+            for index, path in enumerate(paths, 1)
+        )
+        if len(set(requested)) != len(requested):
+            raise ArtifactWorkspaceError("adapter input.paths contains duplicate paths")
+        if any(path not in templates for path in requested):
+            raise ArtifactWorkspaceError("adapter input reads a path outside template_files")
+        selected: list[WorkspaceTemplateFile] = []
+        total_bytes = 0
+        for relative in requested:
+            template = templates[relative]
+            path = self._path(relative)
+            if not path.is_file() or path.is_symlink():
+                raise ArtifactWorkspaceError("workspace template file is missing")
+            try:
+                content = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as error:
+                raise ArtifactWorkspaceError("workspace template file is unreadable") from error
+            if content != template.content:
+                raise ArtifactWorkspaceError("workspace template file differs from immutable task input")
+            total_bytes += len(content.encode("utf-8"))
+            if total_bytes > _MAX_MODEL_CONTEXT_BYTES:
+                raise ArtifactWorkspaceError("requested template input exceeds the model-context limit")
+            selected.append(template)
+        return tuple(selected)
+
     def verify(self, *, written_paths: tuple[str, ...] = ()) -> ArtifactObservation:
         """Evaluate only the task-owned verifier against the materialized file."""
 
@@ -689,6 +736,16 @@ class ArtifactWorkspaceAdapter:
         cached = self._results_by_operation.get(operation_id)
         if cached is not None:
             return cached
+        try:
+            adapter_input = _mapping(request.input, "adapter input")
+        except ArtifactWorkspaceError:
+            result = self._read_failure_result()
+            self._results_by_operation[operation_id] = result
+            return result
+        if adapter_input.get("operation") == "read":
+            result = self._read_result(adapter_input)
+            self._results_by_operation[operation_id] = result
+            return result
         completed = self.workspace.operation_observation(operation_id)
         if completed is not None:
             self._observations.append(completed)
@@ -696,11 +753,11 @@ class ArtifactWorkspaceAdapter:
             self._results_by_operation[operation_id] = result
             return result
         try:
-            adapter_input = _mapping(request.input, "adapter input")
+            candidate_input = self._write_input(adapter_input)
             input_sha256 = hashlib.sha256(
-                _canonical_json(_json_value(adapter_input, "adapter input")).encode("utf-8")
+                _canonical_json(_json_value(candidate_input, "adapter input")).encode("utf-8")
             ).hexdigest()
-            observation = self.workspace.apply_candidate(adapter_input)
+            observation = self.workspace.apply_candidate(candidate_input)
         except ArtifactWorkspaceError:
             input_sha256 = None
             observation = ArtifactObservation(False, "workspace candidate rejected", None)
@@ -709,6 +766,60 @@ class ArtifactWorkspaceAdapter:
         result = self._result_for_observation(observation)
         self._results_by_operation[operation_id] = result
         return result
+
+    @staticmethod
+    def _write_input(value: Mapping[str, Any]) -> Mapping[str, Any]:
+        if "operation" not in value:
+            _strict_fields(value, {"files"}, "adapter input")
+            return {"files": value.get("files")}
+        _strict_fields(value, {"operation", "files"}, "adapter input")
+        if value.get("operation") != "write":
+            raise ArtifactWorkspaceError("adapter input.operation must be read or write")
+        return {"files": value.get("files")}
+
+    def _read_result(self, value: Mapping[str, Any]) -> AdapterResult:
+        try:
+            _strict_fields(value, {"operation", "paths"}, "adapter input")
+            if value.get("operation") != "read":
+                raise ArtifactWorkspaceError("adapter input.operation must be read")
+            templates = self.workspace.read_template_files(
+                _list(value.get("paths"), "adapter input.paths")
+            )
+        except ArtifactWorkspaceError:
+            return self._read_failure_result()
+        model_files = [{"path": item.path, "content": item.content} for item in templates]
+        return AdapterResult(
+            output={
+                "operation": "read",
+                "files": [
+                    {
+                        "path": item.path,
+                        "sha256": hashlib.sha256(item.content.encode("utf-8")).hexdigest(),
+                        "bytes": len(item.content.encode("utf-8")),
+                    }
+                    for item in templates
+                ],
+            },
+            metadata={
+                "environment": "artifact_workspace_v1",
+                "spec_sha256": self.workspace.spec.sha256,
+                "model_context": {
+                    "kind": ARTIFACT_WORKSPACE_MODEL_CONTEXT_KIND,
+                    "files": model_files,
+                },
+            },
+        )
+
+    def _read_failure_result(self) -> AdapterResult:
+        return AdapterResult(
+            status="failed",
+            output={"operation": "read", "files": []},
+            error="artifact workspace read failed",
+            metadata={
+                "environment": "artifact_workspace_v1",
+                "spec_sha256": self.workspace.spec.sha256,
+            },
+        )
 
     def _result_for_observation(self, observation: ArtifactObservation) -> AdapterResult:
         metadata = {
@@ -737,6 +848,7 @@ def _reject_json_constant(value: str) -> None:
 
 __all__ = [
     "ARTIFACT_WORKSPACE_METADATA_KEY",
+    "ARTIFACT_WORKSPACE_MODEL_CONTEXT_KIND",
     "ARTIFACT_WORKSPACE_SCHEMA_VERSION",
     "ArtifactObservation",
     "ArtifactVerifier",

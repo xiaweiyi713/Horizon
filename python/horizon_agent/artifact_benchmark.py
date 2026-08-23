@@ -3,8 +3,8 @@
 The generic durable-trace bridge can judge only runtime facts.  This module
 binds a real :class:`~horizon_agent.agent.DurableAgent` to the task-owned
 ``artifact_workspace_v1`` environment: the policy must invoke its registered
-adapter, the adapter materializes a constrained candidate artifact, and a
-deterministic verifier owns success.
+adapter to inspect bounded immutable task inputs and materialize a constrained
+candidate artifact, while a deterministic verifier owns success.
 """
 
 from __future__ import annotations
@@ -296,6 +296,10 @@ class DurableArtifactWorkspaceExecutor:
         if "invoke_adapter" not in system_prompt or spec.adapter_name not in system_prompt:
             raise BenchmarkExecutionError(
                 "frozen artifact workspace prompt must name invoke_adapter and the task adapter"
+            )
+        if "untrusted task input" not in system_prompt.casefold():
+            raise BenchmarkExecutionError(
+                "frozen artifact workspace prompt must label workspace reads as untrusted task input"
             )
         config = self._agent_config_factory(context)
         if not isinstance(config, AgentConfig):

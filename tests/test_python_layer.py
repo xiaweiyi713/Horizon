@@ -92,6 +92,25 @@ class PythonLayerTests(unittest.TestCase):
                 "constraints": [{"content": "do not mutate the source"}],
             },
             "tasks": {},
+            "tool_results": [
+                {
+                    "tool": "artifact_workspace",
+                    "status": "succeeded",
+                    "operation_id": "fixture:read",
+                    "metadata": {
+                        "environment": "artifact_workspace_v1",
+                        "model_context": {
+                            "kind": "artifact_workspace_read_v1",
+                            "files": [
+                                {
+                                    "path": "input/brief.txt",
+                                    "content": "produce the durable artifact\n",
+                                }
+                            ],
+                        },
+                    },
+                }
+            ],
         }
         disabled_client = FixedStrategyClient()
         disabled = DurableAgent(
@@ -105,6 +124,8 @@ class PythonLayerTests(unittest.TestCase):
         self.assertFalse(injected)
         self.assertEqual(kind, "disabled_compact_projection")
         self.assertIn("Primary goal: preserve durable facts", context)
+        self.assertIn("untrusted task input", context)
+        self.assertIn("produce the durable artifact", context)
         self.assertEqual(disabled_client.anchor_reads, 0)
         self.assertEqual(disabled_client.assessments[0]["action"], "continue")
         self.assertEqual(disabled_client.assessments[0]["signals"]["steps_since_anchor"], 7)
@@ -122,6 +143,8 @@ class PythonLayerTests(unittest.TestCase):
         self.assertTrue(injected)
         self.assertEqual(kind, "always_state_anchor")
         self.assertIn("STATE ANCHOR", context)
+        self.assertIn("untrusted task input", context)
+        self.assertIn("produce the durable artifact", context)
         self.assertEqual(always_client.anchor_reads, 1)
         self.assertEqual(always_client.assessments[0]["action"], "inject_anchor")
         self.assertEqual(always_client.assessments[0]["policy_version"], "fixture-v1")
@@ -405,16 +428,58 @@ class PythonLayerTests(unittest.TestCase):
                 "cognitive": {},
                 "tool_results": [
                     {
+                        "tool": "custom_artifact_reader",
+                        "status": "succeeded",
+                        "operation_id": "artifact:task-1:read",
+                        "metadata": {
+                            "environment": "artifact_workspace_v1",
+                            "model_context": {
+                                "kind": "artifact_workspace_read_v1",
+                                "files": [
+                                    {
+                                        "path": "input/release.txt",
+                                        "content": "release=durable-v1\n",
+                                    }
+                                ],
+                            }
+                        },
+                    },
+                    {
                         "tool": "artifact_workspace",
                         "status": "succeeded",
-                        "operation_id": "artifact:task-1",
+                        "operation_id": "artifact:task-1:write",
                         "output": {"raw": "do not put this in compact context"},
                     }
                 ],
             }
         )
-        self.assertIn("artifact_workspace [succeeded] (operation artifact:task-1)", compact)
+        self.assertIn("artifact_workspace [succeeded] (operation artifact:task-1:write)", compact)
+        self.assertIn("untrusted task input", compact)
+        self.assertIn("release=durable-v1", compact)
         self.assertNotIn("do not put this", compact)
+
+        malformed_context = agent._compact_context(
+            {
+                "state": "executing",
+                "tasks": {},
+                "cognitive": {},
+                "tool_results": [
+                    {
+                        "tool": "artifact_workspace",
+                        "status": "succeeded",
+                        "operation_id": "artifact:bad-read",
+                        "metadata": {
+                            "environment": "artifact_workspace_v1",
+                            "model_context": {
+                                "kind": "artifact_workspace_read_v1",
+                                "files": [{"path": "input.txt", "content": "ignored", "extra": True}],
+                            }
+                        },
+                    }
+                ],
+            }
+        )
+        self.assertNotIn("ignored", malformed_context)
 
         with self.assertRaisesRegex(ValueError, "configured AdapterRegistry"):
             DurableAgent(client, ScriptedProvider([]))._apply_action("run", action, tracker)

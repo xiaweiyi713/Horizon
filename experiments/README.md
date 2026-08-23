@@ -124,8 +124,10 @@ PYTHONPATH=python:. python3 experiments/render_ollama_durable_trace_report.py \
 `ollama_durable_trace.py` 的 scripted Approved plan 当作 benchmark。应另行冻结包含
 heldout artifact task 的 JSONL、模型／条件／seed matrix 与完整 prompt，并使用
 `openai_compatible_artifact_workspace_executor`。该 executor 只允许模型通过
-`artifact_workspace` adapter 写入任务白名单中的文件，最终由精确文本／JSON verifier 判定；
-模型自己返回 `finish` 或伪造 `record_tool_result` 都不会得到成功分数。
+`artifact_workspace` adapter 读取任务拥有的 template input，并写入任务白名单中的文件；
+读取内容会作为 durable、明确标为不可信任务数据的 context 在后续决策中重放，最终由精确
+文本／JSON verifier 判定。模型自己返回 `finish` 或伪造 `record_tool_result` 都不会得到成功
+分数。冻结 prompt 必须包含 `untrusted task input` 提示边界，否则 preflight 会拒绝执行。
 
 启动独立 runtime 与模型 endpoint 后，配置持久化工件根目录，再先跑静态 preflight：
 

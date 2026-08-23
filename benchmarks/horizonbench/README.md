@@ -300,7 +300,29 @@ object (no unrecognized fields are accepted):
 
 The workspace rejects absolute paths, traversal, hidden segments, symlinks,
 template/writable overlaps, unknown fields, duplicate paths, and oversized
-content. A policy submits the candidate via the frozen prompt contract:
+content. A policy first reads only declared template input through the frozen
+prompt contract:
+
+```json
+{
+  "type": "invoke_adapter",
+  "data": {
+    "adapter": "artifact_workspace",
+    "operation_id": "artifact:task-001:read",
+    "task_id": "task-001",
+    "input": {
+      "operation": "read",
+      "paths": ["input/brief.txt"]
+    }
+  }
+}
+```
+
+The bounded file contents are retained in a durable
+`artifact_workspace_read_v1` tool context so replay can present the same input
+to the policy. It is rendered as explicitly **untrusted task input**, never as
+instructions or verification evidence. Use a distinct stable operation ID to
+submit the candidate:
 
 ```json
 {
@@ -310,26 +332,32 @@ content. A policy submits the candidate via the frozen prompt contract:
     "operation_id": "artifact:task-001:write",
     "task_id": "task-001",
     "input": {
+      "operation": "write",
       "files": [{"path": "answer.json", "content": "{\"approved\":true}"}]
     }
   }
 }
 ```
 
-The operation receipt stored beside the workspace contains a submitted-input
-SHA-256 and safe verification observation, not the candidate contents. A new
-Python process that repeats the same stable operation ID returns that recorded
-terminal result instead of rewriting the artifact. This is still at-least-once
-delivery around the boundary: a crash between the write and receipt may cause
-one safe replay, and a non-empty matrix `fault_schedule` is rejected until a
-task environment can genuinely enact and observe it.
+The write operation receipt stored beside the workspace contains a
+submitted-input SHA-256 and safe verification observation, not the candidate
+contents. A new Python process that repeats the same stable write operation ID
+returns that recorded terminal result instead of rewriting the artifact. Read
+content is intentionally retained in its durable tool result so replay can
+show the policy the same bounded task input; therefore template files must be
+appropriate for the model and audit artifact. This is still at-least-once
+delivery around the write boundary: a crash between the write and receipt may
+cause one safe replay, and a non-empty matrix `fault_schedule` is rejected
+until a task environment can genuinely enact and observe it.
 
 This is intentionally a restricted artifact verifier, **not** a complete
 process/container security sandbox. It runs no shell command and provides no
-arbitrary filesystem access. In v1 the adapter only accepts candidate writes;
-put instructions needed by the model in the frozen goal, constraint, and
-approved plan. Never copy `verifier.expected` into those model-visible fields
-for an empirical held-out task.
+arbitrary filesystem access. The adapter can only read immutable template paths
+(at most four files and 32 KiB total) and write declared paths. The frozen
+artifact prompt must include the `untrusted task input` boundary; preflight
+rejects an omitted warning. Never copy `verifier.expected` into the goal,
+constraint, approved plan, or readable template fields for an empirical
+held-out task.
 
 Start a separate runtime with automatic checkpoints disabled, then configure
 the model endpoint and a persistent, caller-owned root for auditable workspace

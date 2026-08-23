@@ -105,6 +105,17 @@
 - Static OpenAI-compatible preflight plus no-network real-Rust-runtime integration coverage via
   `make bench-artifact-workspace`; non-empty fault schedules remain explicitly unsupported
 
+## v1.3 — implemented model-readable artifact task inputs
+
+- Strict read-only `artifact_workspace` operation over task-owned immutable template paths, with
+  path/count/byte limits and a check that the on-disk input still matches the frozen task contract
+- Bounded durable `artifact_workspace_read_v1` context that is re-presented as explicitly
+  untrusted task data, while arbitrary adapter outputs/errors remain hidden from the model context
+- Preflight prompt contract requiring the explicit untrusted-input boundary for any real model
+  artifact workspace run
+- Fixture tasks upgraded to require read → transform → write → objectively verify, plus a
+  regression for finishing exactly on the configured maximum decision step
+
 ## Research execution
 
 - Freeze selected model backbones and held-out artifact tasks, run the objective

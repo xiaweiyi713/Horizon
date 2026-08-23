@@ -94,6 +94,47 @@ class ArtifactWorkspaceTests(unittest.TestCase):
             self.assertEqual(adapter.invocation_count, 1)
             self.assertTrue(adapter.final_observation().verified)
 
+    def test_adapter_reads_only_immutable_template_inputs_for_model_context(self) -> None:
+        spec = ArtifactWorkspaceSpec.from_metadata(_metadata())
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = ArtifactWorkspace.for_attempt(
+                Path(temporary), run_id="run-read", task_id="task-read", spec=spec
+            )
+            adapter = ArtifactWorkspaceAdapter(workspace)
+            result = adapter.execute(
+                AdapterRequest(
+                    "run-read",
+                    "artifact:read-spec",
+                    {"operation": "read", "paths": ["input/spec.json", "README.txt"]},
+                )
+            )
+
+            self.assertEqual(result.status, "succeeded")
+            self.assertEqual(result.output["operation"], "read")
+            self.assertNotIn("content", result.output["files"][0])
+            self.assertEqual(
+                result.metadata["model_context"],
+                {
+                    "kind": "artifact_workspace_read_v1",
+                    "files": [
+                        {"path": "input/spec.json", "content": '{"mode":"strict"}\n'},
+                        {"path": "README.txt", "content": "Write only answer.json.\n"},
+                    ],
+                },
+            )
+            self.assertEqual(adapter.observations, ())
+
+            rejected = adapter.execute(
+                AdapterRequest(
+                    "run-read",
+                    "artifact:read-output",
+                    {"operation": "read", "paths": ["answer.json"]},
+                )
+            )
+            self.assertEqual(rejected.status, "failed")
+            self.assertEqual(rejected.error, "artifact workspace read failed")
+            self.assertFalse((workspace.root / "answer.json").exists())
+
     def test_adapter_reuses_a_terminal_operation_after_python_restart(self) -> None:
         spec = ArtifactWorkspaceSpec.from_metadata(_metadata())
         with tempfile.TemporaryDirectory() as temporary:

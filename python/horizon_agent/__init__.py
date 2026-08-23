@@ -10,6 +10,7 @@ from .adapters import AdapterError, AdapterRegistry, AdapterRequest, AdapterResu
 from .artifact_benchmark import ArtifactWorkspaceJudge, DurableArtifactWorkspaceExecutor, workspace_from_root
 from .artifact_workspace import (
     ARTIFACT_WORKSPACE_METADATA_KEY,
+    ARTIFACT_WORKSPACE_MODEL_CONTEXT_KIND,
     ARTIFACT_WORKSPACE_SCHEMA_VERSION,
     ArtifactObservation,
     ArtifactVerifier,
@@ -42,6 +43,7 @@ __all__ = [
     "AdapterResult",
     "AdaptiveContextBudgetController",
     "ARTIFACT_WORKSPACE_METADATA_KEY",
+    "ARTIFACT_WORKSPACE_MODEL_CONTEXT_KIND",
     "ARTIFACT_WORKSPACE_SCHEMA_VERSION",
     "ArtifactObservation",
     "ArtifactVerifier",

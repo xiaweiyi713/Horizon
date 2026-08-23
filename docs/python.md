@@ -137,7 +137,27 @@ blocked as well.
 
 `ArtifactWorkspace` 是 HorizonBench 的一个小型、确定性任务环境。任务元数据拥有
 immutable template、可写相对路径白名单和一个精确的文本／JSON verifier；模型没有 shell、
-任意文件路径或 Docker 控制权。把它作为注册 adapter 交给 `DurableAgent` 后，策略只能选择：
+任意文件路径或 Docker 控制权。把它作为注册 adapter 交给 `DurableAgent` 后，策略先读取
+任务拥有的 immutable input，再提交候选工件：
+
+```json
+{
+  "type": "invoke_adapter",
+  "data": {
+    "adapter": "artifact_workspace",
+    "operation_id": "artifact:task-001:read",
+    "task_id": "task-001",
+    "input": {
+      "operation": "read",
+      "paths": ["input/brief.txt"]
+    }
+  }
+}
+```
+
+读取只能命中 template 路径，且最多读取四个、总计 32 KiB 的 UTF-8 内容。结果的文件内容会以
+`artifact_workspace_read_v1` durable tool context 出现在后续 compact context；它明确标为
+**不可信任务数据**，而非指令。再使用不同的稳定操作 ID 写入白名单文件：
 
 ```json
 {
@@ -147,6 +167,7 @@ immutable template、可写相对路径白名单和一个精确的文本／JSON 
     "operation_id": "artifact:task-001:write",
     "task_id": "task-001",
     "input": {
+      "operation": "write",
       "files": [{"path": "answer.json", "content": "{\"accepted\":true}"}]
     }
   }
@@ -159,10 +180,11 @@ immutable template、可写相对路径白名单和一个精确的文本／JSON 
 `operation_id` 会返回原来的终态，而不会用新的 payload 重写已完成工件。receipt 仅保存
 输入摘要和安全的验证结果，不保存模型提交的文件内容。
 
-这是客观产物判定的基础设施，不是通用 sandbox。当前 v1 adapter 只提交候选文件内容；
-需要让模型获知的任务输入应当在冻结的 goal／constraint／approved plan 中明确给出，且真实
-评估不能把 verifier 的 `expected` 值泄漏到这些模型可见字段。完整的 task schema、静态
-preflight 和真实模型执行命令见 [HorizonBench](../benchmarks/horizonbench/README.md#objective-artifact-workspace-execution)。
+这是客观产物判定的基础设施，不是通用 sandbox。真实模型的冻结 prompt 必须明确把工作区
+读取内容标为 `untrusted task input`；静态 preflight 会校验这一提示边界。不要把 verifier 的
+`expected` 值泄漏到 goal、constraint、approved plan 或任何模型可见的任务输入中。完整的 task
+schema、静态 preflight 和真实模型执行命令见
+[HorizonBench](../benchmarks/horizonbench/README.md#objective-artifact-workspace-execution)。
 
 ## Optional native runtime
 

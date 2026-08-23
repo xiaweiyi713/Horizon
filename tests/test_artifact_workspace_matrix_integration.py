@@ -149,6 +149,12 @@ class ArtifactWorkspaceMatrixIntegrationTests(unittest.TestCase):
                     for check in preflight["runs"][0]["checks"]
                 )
             )
+            self.assertTrue(
+                all(
+                    check["preflight"]["artifact_environment"]["readable_template_paths"]
+                    for check in preflight["runs"][0]["checks"]
+                )
+            )
 
             address = _free_address()
             server = _start_server(_horizon_binary(), directory / "horizon.db", address)
@@ -186,6 +192,32 @@ class ArtifactWorkspaceMatrixIntegrationTests(unittest.TestCase):
                 all(
                     any(event["type"] == "tool_result_recorded" for event in trace)
                     for trace in traces
+                )
+            )
+            read_contexts = [
+                event["data"]["result"]["metadata"]["model_context"]
+                for trace in traces
+                for event in trace
+                if event["type"] == "tool_result_recorded"
+                and event["data"]["result"]["tool"] == "artifact_workspace"
+                and event["data"]["result"]["output"].get("operation") == "read"
+            ]
+            self.assertEqual(len(read_contexts), len(task_set.task_ids))
+            self.assertTrue(
+                all(context["kind"] == "artifact_workspace_read_v1" for context in read_contexts)
+            )
+            self.assertTrue(
+                any(
+                    file["path"] == "input/release.txt" and file["content"] == "release=durable-v1\n"
+                    for context in read_contexts
+                    for file in context["files"]
+                )
+            )
+            self.assertTrue(
+                any(
+                    [file["path"] for file in context["files"]]
+                    == ["input/request.json", "input/guard.txt"]
+                    for context in read_contexts
                 )
             )
 

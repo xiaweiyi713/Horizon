@@ -2,7 +2,7 @@
 
 > 面向长时程 AI Agent 的持久化认知运行时：Python 负责策略智能，Rust 负责可靠性。
 
-**项目状态：** v1.2 工程里程碑已完成。Horizon 提供经过测试、可复现的运行时与评估基础；在没有冻结模型、任务与客观环境实验之前，项目**不会**宣称自己带来了真实模型性能提升。
+**项目状态：** v1.3 工程里程碑已完成。Horizon 提供经过测试、可复现的运行时与评估基础；在没有冻结模型、任务与客观环境实验之前，项目**不会**宣称自己带来了真实模型性能提升。
 
 长上下文并不等于长时程可靠性。Agent 仍可能遗忘目标、违反早期约束、重复已经失败的方法，或在崩溃后以不一致的进度继续执行。Horizon 将这个问题定义为**持久化执行状态管理**：
 
@@ -70,7 +70,7 @@ Python 策略 / LLM Provider
 - HorizonBench fixture、指标评分器、baseline / ablation smoke harness、真实跨进程故障注入测试与跨领域工作流评分器。
 - 冻结的模型 × 条件 × 随机种子 manifest、按任务原子持久化的 result receipt、可恢复矩阵执行与客观 trace judge。
 - 不执行任务的 matrix preflight：在调用模型或运行时之前，校验任务身份、冻结的 prompt / condition / decoding 控制、凭据是否存在与 trace expectation。
-- 受限的 artifact workspace 任务环境：模型只能经由已注册的 adapter 写入任务白名单文件，精确文本／JSON verifier 独立判定结果；adapter 操作 receipt 会随工作区保存，使稳定操作 ID 在 Python 重启后仍不会重复改写已完成工件。
+- 受限的 artifact workspace 任务环境：模型经由已注册的 adapter 读取任务拥有的 immutable input，并只写入白名单文件；精确文本／JSON verifier 独立判定结果。读到的内容以受限、标记为不可信的 durable tool context 供恢复后复用，写操作 receipt 则让稳定操作 ID 在 Python 重启后不重复改写已完成工件。
 
 ## 快速开始：无需 API Key
 

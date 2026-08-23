@@ -122,8 +122,11 @@ adapters outside Rust's policy boundary without losing durable audit semantics.
 The bounded `ArtifactWorkspaceAdapter` additionally stores a task-owned
 operation receipt beside its verifier workspace, so a restarted Python process
 can return the prior terminal observation for the same operation ID without
-rewriting the artifact. It is an exact artifact-verification primitive, not a
-general filesystem or process sandbox.
+rewriting the artifact. It can expose only declared immutable template files as
+a bounded durable `artifact_workspace_read_v1` context; the policy renders that
+context as explicitly untrusted task data while all other external tool output
+remains hidden. It is an exact artifact-verification primitive, not a general
+filesystem or process sandbox.
 
 ## Learned intervention boundary
 
